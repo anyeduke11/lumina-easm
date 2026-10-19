@@ -1,0 +1,193 @@
+{
+ "checked_at": "2026-10-17T03:44:36Z",
+ "direct": [
+  {
+   "tool": "masscan",
+   "repo": "robertdavidgraham/masscan",
+   "registered_lic": "AGPL-3.0",
+   "scope": "生产·cap-port",
+   "upstream_spdx": "AGPL-3.0",
+   "upstream_name": "GNU Affero General Public License v3.0",
+   "stars": 26076,
+   "pushed_at": "2026-10-05T19:51:27Z",
+   "match": true
+  },
+  {
+   "tool": "nmap",
+   "repo": "nmap/nmap",
+   "registered_lic": "NPSL",
+   "scope": "生产·cap-port",
+   "upstream_spdx": "NOASSERTION",
+   "upstream_name": "Other",
+   "stars": 13793,
+   "pushed_at": "2026-10-15T22:45:06Z",
+   "match": false
+  },
+  {
+   "tool": "observer_ward",
+   "repo": "emo-crab/observer_ward",
+   "registered_lic": "GPL-3.0",
+   "scope": "生产·cap-finger",
+   "upstream_spdx": "GPL-3.0",
+   "upstream_name": "GNU General Public License v3.0",
+   "stars": 208,
+   "pushed_at": "2026-10-01T10:50:56Z",
+   "match": true
+  },
+  {
+   "tool": "gowitness",
+   "repo": "sensepost/gowitness",
+   "registered_lic": "GPL-3.0",
+   "scope": "生产·cap-finger",
+   "upstream_spdx": "GPL-3.0",
+   "upstream_name": "GNU General Public License v3.0",
+   "stars": 4541,
+   "pushed_at": "2026-10-11T05:11:46Z",
+   "match": true
+  },
+  {
+   "tool": "openvas-scanner",
+   "repo": "greenbone/openvas-scanner",
+   "registered_lic": "GPL-2.0",
+   "scope": "生产·cap-vuln",
+   "upstream_spdx": "GPL-2.0",
+   "upstream_name": "GNU General Public License v2.0",
+   "stars": 4871,
+   "pushed_at": "2026-10-16T17:32:01Z",
+   "match": true
+  },
+  {
+   "tool": "trufflehog",
+   "repo": "trufflesecurity/trufflehog",
+   "registered_lic": "AGPL-3.0",
+   "scope": "生产·cap-leak",
+   "upstream_spdx": "AGPL-3.0",
+   "upstream_name": "GNU Affero General Public License v3.0",
+   "stars": 28542,
+   "pushed_at": "2026-10-16T18:40:02Z",
+   "match": true
+  },
+  {
+   "tool": "semgrep",
+   "repo": "semgrep/semgrep",
+   "registered_lic": "LGPL-2.1",
+   "scope": "生产·cap-leak",
+   "upstream_spdx": "LGPL-2.1",
+   "upstream_name": "GNU Lesser General Public License v2.1",
+   "stars": 17097,
+   "pushed_at": "2026-10-16T00:03:03Z",
+   "match": true
+  },
+  {
+   "tool": "subfinder",
+   "repo": "projectdiscovery/subfinder",
+   "registered_lic": "MIT",
+   "scope": "生产·抽查",
+   "upstream_spdx": "MIT",
+   "upstream_name": "MIT License",
+   "stars": 14607,
+   "pushed_at": "2026-10-14T20:46:37Z",
+   "match": true
+  },
+  {
+   "tool": "nuclei",
+   "repo": "projectdiscovery/nuclei",
+   "registered_lic": "MIT",
+   "scope": "生产·抽查",
+   "upstream_spdx": "MIT",
+   "upstream_name": "MIT License",
+   "stars": 32074,
+   "pushed_at": "2026-10-17T03:33:47Z",
+   "match": true
+  },
+  {
+   "tool": "ffuf",
+   "repo": "ffuf/ffuf",
+   "registered_lic": "MIT",
+   "scope": "生产·抽查(dirsearch 替代)",
+   "upstream_spdx": "MIT",
+   "upstream_name": "MIT License",
+   "stars": 16892,
+   "pushed_at": "2026-09-26T08:58:08Z",
+   "match": true
+  },
+  {
+   "tool": "prowler",
+   "repo": "prowler-cloud/prowler",
+   "registered_lic": "Apache-2.0",
+   "scope": "生产·抽查",
+   "upstream_spdx": "Apache-2.0",
+   "upstream_name": "Apache License 2.0",
+   "stars": 15047,
+   "pushed_at": "2026-10-16T09:14:47Z",
+   "match": true
+  },
+  {
+   "tool": "gitleaks",
+   "repo": "gitleaks/gitleaks",
+   "registered_lic": "MIT",
+   "scope": "生产·抽查",
+   "upstream_spdx": "MIT",
+   "upstream_name": "MIT License",
+   "stars": 30045,
+   "pushed_at": "2026-09-30T04:14:02Z",
+   "match": true
+  }
+ ],
+ "search": [
+  {
+   "doc_name": "bbot",
+   "top_repo": "blacklanternsecurity/bbot",
+   "upstream_spdx": "AGPL-3.0",
+   "stars": 10711,
+   "pushed_at": "2026-10-17T00:45:33Z",
+   "archived": false,
+   "desc": "The recursive internet scanner for hackers. 🧡"
+  },
+  {
+   "doc_name": "dirsearch",
+   "top_repo": "maurosoria/dirsearch",
+   "upstream_spdx": null,
+   "stars": 14969,
+   "pushed_at": "2026-10-16T19:12:38Z",
+   "archived": false,
+   "desc": "Web path scanner"
+  },
+  {
+   "doc_name": "ScoutSuite",
+   "top_repo": "nccgroup/ScoutSuite",
+   "upstream_spdx": "GPL-2.0",
+   "stars": 7851,
+   "pushed_at": "2025-09-23T18:33:52Z",
+   "archived": false,
+   "desc": "Multi-Cloud Security Auditing Tool"
+  },
+  {
+   "doc_name": "OneForAll",
+   "top_repo": "shmilylty/OneForAll",
+   "upstream_spdx": "GPL-3.0",
+   "stars": 10109,
+   "pushed_at": "2026-05-11T14:02:22Z",
+   "archived": false,
+   "desc": "OneForAll是一款功能强大的子域收集工具"
+  },
+  {
+   "doc_name": "EHole",
+   "top_repo": "EdgeSecurityTeam/EHole",
+   "upstream_spdx": "Apache-2.0",
+   "stars": 3516,
+   "pushed_at": "2024-04-02T06:02:34Z",
+   "archived": false,
+   "desc": "EHole(棱洞)3.0 重构版-红队重点攻击系统指纹探测工具"
+  },
+  {
+   "doc_name": "rad",
+   "top_repo": "sansan0/TrendRadar",
+   "upstream_spdx": "GPL-3.0",
+   "stars": 62961,
+   "pushed_at": "2026-10-15T11:24:14Z",
+   "archived": false,
+   "desc": "⭐AI-driven public opinion & trend monitor with multi-platform aggregation, RSS, and smart alerts.🎯 告"
+  }
+ ]
+}

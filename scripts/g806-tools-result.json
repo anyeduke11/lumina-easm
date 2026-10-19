@@ -1,0 +1,91 @@
+{
+ "bench_at": "2026-10-17T10:18:06Z",
+ "mode": "local-deployment (D5: no container)",
+ "target": "http://127.0.0.1:8077 (self-owned)",
+ "reps": 3,
+ "cases": [
+  {
+   "tier": "S",
+   "cmd": "nmap -sT -Pn -n --max-rate 200 -p 22,80,443,8077,8080,3306,6379,8000 127.0.0.1",
+   "desc": "nmap connect 8 端口（轻量探测代表）",
+   "n": 3,
+   "rc_all": [
+    0,
+    0,
+    0
+   ],
+   "median": {
+    "wall": 0.05,
+    "user": 0.01,
+    "sys": 0.0,
+    "rss": 7487488.0
+   }
+  },
+  {
+   "tier": "M",
+   "cmd": "gitleaks detect --no-git --source /tmp/g806-bench-target/repo --config /tmp/g806-bench-target/gitleaks.toml --redact --exit-code 0",
+   "desc": "gitleaks 扫 208 文件仓库（本地判敏代表）",
+   "n": 3,
+   "rc_all": [
+    0,
+    0,
+    0
+   ],
+   "median": {
+    "wall": 0.06,
+    "user": 0.35,
+    "sys": 0.03,
+    "rss": 29999104.0
+   }
+  },
+  {
+   "tier": "L",
+   "cmd": "ffuf -u http://127.0.0.1:8077/FUZZ -w /tmp/g806-bench-target/wordlist.txt -rate 1000 -t 50 -mc 200 -s",
+   "desc": "ffuf 1000 词 @rate1000 t50（目录爆破代表）",
+   "n": 3,
+   "rc_all": [
+    0,
+    0,
+    0
+   ],
+   "median": {
+    "wall": 1.13,
+    "user": 0.12,
+    "sys": 0.14,
+    "rss": 20971520.0
+   }
+  },
+  {
+   "tier": "XL",
+   "cmd": "nmap -sT -Pn -n --max-rate 1000 -p 1-1024 127.0.0.1",
+   "desc": "nmap connect 1024 端口（大网段扫描代表）",
+   "n": 3,
+   "rc_all": [
+    0,
+    0,
+    0
+   ],
+   "median": {
+    "wall": 1.03,
+    "user": 0.88,
+    "sys": 0.14,
+    "rss": 7684096.0
+   }
+  }
+ ],
+ "rate_limit_check": {
+  "rate200": {
+   "wall_s": 1.51,
+   "rps": 201.0
+  },
+  "rate50": {
+   "wall_s": 6.05,
+   "rps": 51.0
+  },
+  "enforced": true
+ },
+ "gitleaks_verify": {
+  "leaks_found": 16,
+  "expect_ge": 16
+ }
+}

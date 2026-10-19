@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: vet
+        run: go vet ./...
+      - name: build
+        run: go build ./...
+      - name: test
+        run: go test ./... -count=1
+      # V-7 追溯对账（C-1 编号闭合）：每个 Go 包注释须携带需求编号
+      - name: trace-check
+        run: python3 scripts/trace-check.py
+      # 许可证隔离检查（FR-HRN-07 / WP-M1-11）：M1 起接入 SBOM 与镜像扫描卡点
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest

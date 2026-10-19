@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="470" viewBox="0 0 1200 470" role="img" aria-labelledby="wfTitle wfDesc">
+  <title id="wfTitle">Lumina · 烛隐 EASM 全链路：排查 → 取证 → 处置 → 通报 → 报告</title>
+  <desc id="wfDesc">五阶段巡检汇入采集与判定引擎，经台账三重门零误报闭环，流向处置工单、线索通报与四受众报告；全程受授权一票否决闸约束。</desc>
+
+  <defs>
+    <linearGradient id="bgGrad2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0A0F1E"/>
+      <stop offset="1" stop-color="#0E1528"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="470" rx="26" fill="url(#bgGrad2)"/>
+
+  <text x="40" y="38" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="19" fill="#8B94AB" letter-spacing="2">排查 → 取证 → 处置 → 通报 → 报告 · 全链路闭环</text>
+
+  <!-- 行1：五阶段 -->
+  <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace">
+    <g>
+      <rect x="35" y="62" width="210" height="54" rx="10" fill="#101A30" stroke="#232B40"/>
+      <rect x="47" y="76" width="34" height="26" rx="6" fill="#101A30" stroke="#2DD4BF"/>
+      <text x="64" y="94" font-size="14" fill="#2DD4BF" text-anchor="middle">P1</text>
+      <text x="92" y="97" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif" font-size="21" fill="#E6EDF7">搜索引擎</text>
+    </g>
+    <g>
+      <rect x="265" y="62" width="210" height="54" rx="10" fill="#101A30" stroke="#232B40"/>
+      <rect x="277" y="76" width="34" height="26" rx="6" fill="#101A30" stroke="#2DD4BF"/>
+      <text x="294" y="94" font-size="14" fill="#2DD4BF" text-anchor="middle">P2</text>
+      <text x="322" y="97" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif" font-size="21" fill="#E6EDF7">空间测绘</text>
+    </g>
+    <g>
+      <rect x="495" y="62" width="210" height="54" rx="10" fill="#101A30" stroke="#232B40"/>
+      <rect x="507" y="76" width="34" height="26" rx="6" fill="#101A30" stroke="#2DD4BF"/>
+      <text x="524" y="94" font-size="14" fill="#2DD4BF" text-anchor="middle">P3</text>
+      <text x="552" y="97" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif" font-size="21" fill="#E6EDF7">端口目录</text>
+    </g>
+    <g>
+      <rect x="725" y="62" width="210" height="54" rx="10" fill="#101A30" stroke="#232B40"/>
+      <rect x="737" y="76" width="34" height="26" rx="6" fill="#101A30" stroke="#2DD4BF"/>
+      <text x="754" y="94" font-size="14" fill="#2DD4BF" text-anchor="middle">P4</text>
+      <text x="782" y="97" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif" font-size="21" fill="#E6EDF7">第三方渠道</text>
+    </g>
+    <g>
+      <rect x="955" y="62" width="210" height="54" rx="10" fill="#2A0F1A" stroke="#F43F5E"/>
+      <rect x="967" y="76" width="34" height="26" rx="6" fill="#2A0F1A" stroke="#F43F5E"/>
+      <text x="984" y="94" font-size="14" fill="#F43F5E" text-anchor="middle">P5</text>
+      <text x="1012" y="97" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif" font-size="21" fill="#FECDD3">暗网兜底</text>
+    </g>
+    <text x="253" y="92" font-size="24" fill="#2DD4BF" text-anchor="middle">→</text>
+    <text x="483" y="92" font-size="24" fill="#2DD4BF" text-anchor="middle">→</text>
+    <text x="713" y="92" font-size="24" fill="#2DD4BF" text-anchor="middle">→</text>
+    <text x="943" y="92" font-size="24" fill="#F43F5E" text-anchor="middle">→</text>
+  </g>
+
+  <!-- 行1→行2 -->
+  <path d="M600 116 v20" fill="none" stroke="#2DD4BF" stroke-width="1.5"/>
+  <path d="M595 134 l5 7 l5 -7" fill="none" stroke="#2DD4BF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- 行2：采集与判定引擎 -->
+  <g>
+    <rect x="35" y="150" width="1130" height="58" rx="10" fill="#101A30" stroke="#2DD4BF66"/>
+    <text x="55" y="176" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif" font-size="22" font-weight="600" fill="#7BE3D5">采集与判定引擎</text>
+    <text x="55" y="198" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16.5" fill="#9AA4BC">collect：scan:repo / :port / :dir · darkweb：样本巡检 + 归属判定 · ownership：指纹基线</text>
+  </g>
+
+  <path d="M600 208 v20" fill="none" stroke="#2DD4BF" stroke-width="1.5"/>
+  <path d="M595 226 l5 7 l5 -7" fill="none" stroke="#2DD4BF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- 行3：台账 + 三重门 -->
+  <g>
+    <rect x="35" y="244" width="1130" height="58" rx="10" fill="#101A30" stroke="#2DD4BF66"/>
+    <text x="55" y="270" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif" font-size="22" font-weight="600" fill="#7BE3D5">台账 · 唯一事实源（L-* 编号）</text>
+    <text x="55" y="292" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16.5" fill="#9AA4BC">零误报三重门：V-5 双信源 ≥2 · V-10 反证必答 · S-2 复测证据闭环；closed 必带 evidence_ref</text>
+  </g>
+
+  <path d="M600 302 v20" fill="none" stroke="#2DD4BF" stroke-width="1.5"/>
+  <path d="M595 320 l5 7 l5 -7" fill="none" stroke="#2DD4BF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- 行4：处置 · 通报 · 报告 -->
+  <g>
+    <rect x="35" y="338" width="1130" height="58" rx="10" fill="#101A30" stroke="#2DD4BF66"/>
+    <text x="55" y="364" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif" font-size="22" font-weight="600" fill="#7BE3D5">处置 · 通报 · 报告</text>
+    <text x="55" y="386" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16.5" fill="#9AA4BC">工单五态（待整改→处置中→已通报平台→已下架→已处置）· 通报（公安 24h / 省中心 48h）· 四受众报告 · 证据 WORM</text>
+  </g>
+
+  <!-- 行5：授权一票否决 -->
+  <g>
+    <rect x="35" y="408" width="1130" height="44" rx="10" fill="#2A0F1A" stroke="#F43F5E"/>
+    <text x="55" y="436" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif" font-size="21" font-weight="600" fill="#F87171">授权闸 · 一票否决</text>
+    <text x="235" y="436" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16.5" fill="#FECDD3">无有效授权（有效期 / 时间窗 / 范围）→ 巡检直接拒绝并落审计 —— 任何一步都不伪造成功</text>
+  </g>
+</svg>

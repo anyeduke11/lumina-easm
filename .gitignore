@@ -1,0 +1,21 @@
+bin/
+dist/
+*.test
+*.out
+.DS_Store
+node_modules/
+.env
+.env.*
+coverage/
+backups/
+
+# 证据存储（WORM 固化面，含真实巡检产物，禁止入库）
+evidence-store/
+
+# 本地编辑器 / 日志 / 归档
+.vscode/
+.idea/
+*.log
+*.dump
+*.tar
+*.tmp
