@@ -60,7 +60,7 @@ ck "有授权 sweep 受理" "$S1" "201"
 echo "  （second_auth=false 已录入：爆破类 RequireSecondAuth 拒路径由 authz_test 覆盖，演练以录入值示证）"
 
 echo "== ⑤ 留痕（PG 审计仅追加）=="
-$PSQL -h 127.0.0.1 -U duke -d easm -tAc "SELECT result||'|'||action FROM audit_logs WHERE tenant_id='$TID' AND action='authz.check' AND result='deny' LIMIT 1" | xargs -I{} echo "  拒绝留痕样例: {}"
+$PSQL -h 127.0.0.1 -U "$USER" -d easm -tAc "SELECT result||'|'||action FROM audit_logs WHERE tenant_id='$TID' AND action='authz.check' AND result='deny' LIMIT 1" | xargs -I{} echo "  拒绝留痕样例: {}"
 
 echo "== ⑥ D3 撤回场景：缩短 valid_to 重录（新版本 doc_hash）=="
 # 撤回=截短但仍须是未来时间（录入即过期会被 validate 拒）→ 动态取明天，避免脚本时间炸弹
@@ -79,16 +79,16 @@ RC2=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$H1" -H "$H2" --data-bi
 ck "已过期授权录入被拒 400（防静默无效录入）" "$RC2" "400"
 # 撤回生效语义=valid_to 截短；用「明天到期」验证 sweep 仍受理但 check 在到期前正常——
 # 真正到期后拒路径由 authz_test『过期→no_valid_scope』用例覆盖（s.now() 注入）。此处示证截短成功+回显。
-SCNT=$($PSQL -h 127.0.0.1 -U duke -d easm -tAc "SELECT count(*) FROM auth_scopes WHERE tenant_id='$TID'")
+SCNT=$($PSQL -h 127.0.0.1 -U "$USER" -d easm -tAc "SELECT count(*) FROM auth_scopes WHERE tenant_id='$TID'")
 ck "scope 当前态=1 行（新版本覆盖）" "$SCNT" "1"
 curl -s -H "$H1" $B/v1/tenants/$TID/authz | python3 -c "import json,sys;d=json.load(sys.stdin);print('  当前生效版本: doc_hash=',d['doc_hash'],'| valid_to=',d['valid_to'],'| signer=',d['signer'])"
 echo "  （Upsert 权限闸 PermManageTenants 与拒绝审计由 authz_test/httpapi 端点测试覆盖——RPT §3.2）"
 # 终局审计判定（check 口径=CR-005：deny 必留痕、allow 不落该步；upsert 成败均计）：
 # 预期 authz.* ≥6 = upsert 2（v1 录入+撤回重录）+ check deny 4
-CNT=$( $PSQL -h 127.0.0.1 -U duke -d easm -tAc "SELECT count(*) FROM audit_logs WHERE tenant_id='$TID' AND action LIKE 'authz.%'")
+CNT=$( $PSQL -h 127.0.0.1 -U "$USER" -d easm -tAc "SELECT count(*) FROM audit_logs WHERE tenant_id='$TID' AND action LIKE 'authz.%'")
 ck "authz.* 审计总条数 ≥6" "$([ "$CNT" -ge 6 ] && echo ok || echo bad)" "ok"
 echo "  该租户审计动作分布（authz 闸+业务操作全留痕；sweep 进度另落 006 sweeps 表）:"
-$PSQL -h 127.0.0.1 -U duke -d easm -tAc "SELECT action||'='||result||':'||count(*) FROM audit_logs WHERE tenant_id='$TID' GROUP BY action,result ORDER BY action" | sed 's/^/    /'
+$PSQL -h 127.0.0.1 -U "$USER" -d easm -tAc "SELECT action||'='||result||':'||count(*) FROM audit_logs WHERE tenant_id='$TID' GROUP BY action,result ORDER BY action" | sed 's/^/    /'
 
 rm -f /tmp/drill-authz-doc.json /tmp/drill-upsert.json /tmp/drill-sweep.json /tmp/drill-revoke.json /tmp/drill-expired.json
 if [ "$FAIL" = "0" ]; then echo "SOP DRILL OK — 五步+撤回路径系统面全通过（租户 $TID 已入库示证）"; else echo "SOP DRILL FAIL（见 ✗ 项）"; exit 1; fi

@@ -43,8 +43,8 @@ SQ=$(curl -s -H "$H1" $B/v1/ownership/queue | python3 -c 'import json,sys; d=jso
 curl -s -X POST -H "$H1" -H "$H2" -d '{"verdict":"无关","reviewer":"smoke"}' $B/v1/ownership/queue/$SQ/resolve | head -c 120; echo
 curl -s -H "$H1" $B/v1/monitors | python3 -c 'import json,sys; d=json.load(sys.stdin); print("   monitors:", d["total"], "| 事件流水:", len(d.get("events",[])), "| 定时历史:", len(d["items"][0]["history"]) if d["items"] else 0)'
 echo "8) PG 持久化（005_knowledge.sql，需本地 psql）:"
-/opt/homebrew/opt/postgresql@18/bin/psql -h 127.0.0.1 -U duke -d easm -tAc "SELECT count(*) FROM vuln_entries WHERE cve='CVE-2026-88888'" | xargs -I{} echo "   导入条目落库: {} (应为 1)"
-/opt/homebrew/opt/postgresql@18/bin/psql -h 127.0.0.1 -U duke -d easm -tAc "SELECT count(*) FROM intel_entries" | xargs -I{} echo "   情报表行数: {}"
+/opt/homebrew/opt/postgresql@18/bin/psql -h 127.0.0.1 -U "$USER" -d easm -tAc "SELECT count(*) FROM vuln_entries WHERE cve='CVE-2026-88888'" | xargs -I{} echo "   导入条目落库: {} (应为 1)"
+/opt/homebrew/opt/postgresql@18/bin/psql -h 127.0.0.1 -U "$USER" -d easm -tAc "SELECT count(*) FROM intel_entries" | xargs -I{} echo "   情报表行数: {}"
 echo "9) 增量 Diff 告警（FR-MON-002）+ 出口 dispatch 幂等（FR-MON-004，需 PG 支撑快照）:"
 curl -s -X POST -H "$H1" -H "$H2" -d '{"name":"资产增量监控","kind":"diff","interval_sec":900}' $B/v1/monitors -o /dev/null -w '   建 diff 监控器:%{http_code}\n'
 DIFF_ID=$(curl -s -H "$H1" $B/v1/monitors | python3 -c 'import json,sys; d=json.load(sys.stdin); ids=[m["spec"]["id"] for m in d["items"] if m["spec"]["kind"]=="diff"]; print(ids[0] if ids else 0)')

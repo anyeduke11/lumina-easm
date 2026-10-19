@@ -9,7 +9,7 @@ W=/tmp/easm-wrk-b6
 B=http://localhost:18080
 H1='Authorization: Bearer tok-admin' H2='Content-Type: application/json'
 export EASM_PG_DSN=$(cat /tmp/easm_dsn.txt) EASM_ACTIVITY_STARTTOCLOSE=20s
-q() { $PSQL -h 127.0.0.1 -U duke -d easm -tAc "$1"; }
+q() { $PSQL -h 127.0.0.1 -U "$USER" -d easm -tAc "$1"; }
 
 echo "1) 给 t-cr 追加 8 个新命名高危资产（新去重键 → 活动含真实 PG 写入，窗口 ~秒级）"
 for i in $(seq 21 28); do

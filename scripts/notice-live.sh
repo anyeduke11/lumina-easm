@@ -31,10 +31,10 @@ echo -n "  有效回执: "; curl -s -X POST $B/v1/tenants/$T/notices/$NID/receip
 echo -n "  重复回填: "; curl -s -X POST $B/v1/tenants/$T/notices/$NID/receipt -H "$A" -H "$J" -d '{"receipt_no":"伪造二份"}' | python3 -c "import json,sys;print(json.load(sys.stdin)['error']['code'])"
 
 echo "== ⑤ CR-002 列锁定：裸 UPDATE 改 target 被触发器拒 =="
-$PSQL -h 127.0.0.1 -U duke -d easm -c "UPDATE notices SET target='某媒体' WHERE id='$NID'" 2>&1 | grep -iE "CR-002|ERROR" | head -1 | sed 's/^/  /' || echo "  （未改=锁定生效）"
+$PSQL -h 127.0.0.1 -U "$USER" -d easm -c "UPDATE notices SET target='某媒体' WHERE id='$NID'" 2>&1 | grep -iE "CR-002|ERROR" | head -1 | sed 's/^/  /' || echo "  （未改=锁定生效）"
 
 echo "== ⑥ A-08 超时催办：直插一条 25h 前的待报送单 → overdue 命中 =="
-$PSQL -h 127.0.0.1 -U duke -d easm -q -c "INSERT INTO notices(id,tenant_id,ledger_id,target,status,material_hash,material_ref,n,created_at) VALUES('NB-old-$T','$T','L-$T','属地公安机关','待报送','deadbeef','notice://$T/old','{\"id\":\"NB-old-$T\",\"tenant_id\":\"$T\",\"target\":\"属地公安机关\",\"status\":\"待报送\",\"deadline_h\":24}', now() - interval '25 hours')"
+$PSQL -h 127.0.0.1 -U "$USER" -d easm -q -c "INSERT INTO notices(id,tenant_id,ledger_id,target,status,material_hash,material_ref,n,created_at) VALUES('NB-old-$T','$T','L-$T','属地公安机关','待报送','deadbeef','notice://$T/old','{\"id\":\"NB-old-$T\",\"tenant_id\":\"$T\",\"target\":\"属地公安机关\",\"status\":\"待报送\",\"deadline_h\":24}', now() - interval '25 hours')"
 curl -s "$B/v1/tenants/$T/notices/overdue" -H "$A" | python3 -c "import json,sys;d=json.load(sys.stdin);print('  overdue_total=%d 命中=%s'%(d['total'],[i['id'] for i in d['items']]))"
 
 echo "== ⑦ 合规报送总结导出（三段+哈希） =="

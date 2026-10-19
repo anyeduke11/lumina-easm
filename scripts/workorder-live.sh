@@ -45,6 +45,6 @@ echo -n "  "; curl -s -X POST $B/v1/tenants/$T/workorders/$WID/advance -H "$A" -
 
 echo "== ⑦ 催办台筛选 + psql 直查 011 =="
 curl -s "$B/v1/tenants/$T/workorders?status=待整改" -H "$A" | python3 -c "import json,sys;print('  待整改筛内=',json.load(sys.stdin)['total'],'(应为 0, 已推进)')"
-/opt/homebrew/opt/postgresql@18/bin/psql -h 127.0.0.1 -U duke -d easm -Atc \
+/opt/homebrew/opt/postgresql@18/bin/psql -h 127.0.0.1 -U "$USER" -d easm -Atc \
   "SELECT status FROM work_orders WHERE tenant_id='$T';" | sed 's/^/  work_orders.status: /'
 echo "WORKORDER LIVE OK — FR-CHN-004 五态跟踪至下架全链（011 落库）"

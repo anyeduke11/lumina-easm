@@ -67,7 +67,7 @@ test-integ:
 
 backup: ## 全库快照（001–007 对象含 sweeps/auth_scopes 事实源；custom 格式可 pg_restore）
 	@mkdir -p backups
-	/opt/homebrew/opt/postgresql@18/bin/pg_dump -h 127.0.0.1 -U duke -d easm -Fc -f backups/easm-$$(date +%Y%m%d-%H%M%S).dump
+	/opt/homebrew/opt/postgresql@18/bin/pg_dump -h 127.0.0.1 -U $(USER) -d easm -Fc -f backups/easm-$$(date +%Y%m%d-%H%M%S).dump
 	@ls -t backups | head -1 | xargs -I{} echo "backup ok: backups/{}（保留最近 7 份可手动清理）"
 
 # 以下 compose 路径暂缓启用（开发环境无容器）；生产 K8s 方案不变（设计方案 §9）

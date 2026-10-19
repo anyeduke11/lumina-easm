@@ -45,7 +45,7 @@ curl -s "$B/v1/tenants/$T/darkweb/packages" -H "$A" \
 curl -s "$B/v1/tenants/$T/darkweb/packages/$PID" -H "$A" \
   | python3 -c "import json,sys;p=json.load(sys.stdin);assert p['content_hash']=='$CHASH',p['content_hash'];it=p['items'][0];assert it['sample_hash'] and it['captured_at'] and it['source'],it;print('  ✓ get 同 content_hash+取证要素完整')"
 echo "-- ④c psql 直查落库行"
-/opt/homebrew/opt/postgresql@18/bin/psql -h 127.0.0.1 -U duke -d easm -Atc \
+/opt/homebrew/opt/postgresql@18/bin/psql -h 127.0.0.1 -U "$USER" -d easm -Atc \
   "SELECT count(*) FROM ownership_fingerprints WHERE tenant_id='$T'; SELECT count(*) FROM lead_packages WHERE package_id='$PID';" \
   | sed 's/^/  fp_rows|pkg_rows: /'
 echo "PERSIST DRILL OK — 010 跨重启判据与通报材料均恢复"
