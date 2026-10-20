@@ -16,8 +16,8 @@ import (
 )
 
 // newEvalServer 双租户 + R7/R1/R5 三令牌 + 台账与评测集共用内存实现
-//（与 newTestServer 同形态；评测集服务在测试内装配=可断言装配语义）。
-func newEvalServer(t *testing.T) *httptest.Server {
+// （与 newTestServer 同形态；评测集服务在测试内装配=可断言装配语义）。
+func newEvalServer(t *testing.T, evalOpts ...func(*evalset.Service)) *httptest.Server {
 	t.Helper()
 	l := &audit.MemLog{}
 	ctx := context.Background()
@@ -32,6 +32,9 @@ func newEvalServer(t *testing.T) *httptest.Server {
 	}
 	led := ledger.NewService(ledger.NewMemStore(), l)
 	ev := evalset.New(evalset.NewMemStore())
+	for _, f := range evalOpts {
+		f(ev)
+	}
 	srv := httptest.NewServer(New(tenant.NewService(ts, l), nil, tokens,
 		WithLedger(led), WithEval(ev)).Handler())
 	t.Cleanup(srv.Close)

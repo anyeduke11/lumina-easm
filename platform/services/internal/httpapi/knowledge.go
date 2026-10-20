@@ -191,8 +191,19 @@ func (s *Server) handleOwnershipQueue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, requestIDOf(r), http.StatusNotImplemented, "kb_unavailable", "归属判定未启用")
 		return
 	}
+	p := principalOf(r)
+	if !p.Can(rbac.PermReadAssets) {
+		s.denyAccess(w, r, "ownership.queue", "", "/v1/ownership/queue", "无读取权限")
+		return
+	}
 	q := s.own.Queue()
-	writeJSON(w, http.StatusOK, map[string]any{"items": q, "total": len(q)})
+	visible := make([]ownership.QueueItem, 0, len(q))
+	for _, it := range q {
+		if p.InScope(it.Tenant) { // 复核项行级租户闸（V-4）
+			visible = append(visible, it)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": visible, "total": len(visible)})
 }
 
 // handleOwnershipResolve 复核队列人工出口（PRD R2：可审计，不静默丢弃；留痕由 Service 追加）。

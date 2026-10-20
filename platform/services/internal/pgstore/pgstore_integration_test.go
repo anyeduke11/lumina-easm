@@ -16,7 +16,7 @@ import (
 // 集成测试需本地 PG + 已应用 migrations/001、002。缺 DSN 自动跳过。
 // DSN 必须是 easm_app 角色（RLS 生效），如：
 //
-//	export EASM_PG_DSN=postgres://easm_app:easm-app-dev@127.0.0.1:5432/easm?sslmode=disable
+//	export EASM_PG_DSN=postgres://easm_app:easm-***@127.0.0.1:5432/easm?sslmode=disable
 func mustDB(t *testing.T) *DB {
 	t.Helper()
 	dsn := os.Getenv("EASM_PG_DSN")

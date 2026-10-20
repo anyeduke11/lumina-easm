@@ -54,17 +54,19 @@ type Run struct {
 }
 
 type Service struct {
-	mu       sync.Mutex
-	vuln     *vuln.Service
-	intel    *intel.Service
-	provider func() map[string][]asset.Asset
-	snap     SnapStore // FR-MON-002 diff 快照端口；nil=DiffScan 跳过（能力边界声明）
-	alerts   []Alert
-	keys     map[string]bool
-	specs    map[int]*Spec
-	history  map[int][]Run
-	seq      int
-	ctx      context.Context
+	mu        sync.Mutex
+	vuln      *vuln.Service
+	intel     *intel.Service
+	provider  func() map[string][]asset.Asset
+	snap      SnapStore // FR-MON-002 diff 快照端口；nil=DiffScan 跳过（能力边界声明）
+	taskStore TaskStore // FR-MON-003 任务单端口（nil=进程内回退；pgstore.MonitorTaskStore 满足）
+	taskMem   TaskStore // 进程内回退（懒初始化）
+	alerts    []Alert
+	keys      map[string]bool
+	specs     map[int]*Spec
+	history   map[int][]Run
+	seq       int
+	ctx       context.Context
 }
 
 func New(v *vuln.Service, i *intel.Service, provider func() map[string][]asset.Asset) *Service {
@@ -183,7 +185,11 @@ func (s *Service) scanAt(trigger string, specID int, kind string, visible map[st
 	defer s.mu.Unlock()
 	now := time.Now().UTC()
 	all := []asset.Asset{}
+	tenantOf := map[string]string{}
 	for _, list := range visible {
+		for _, a := range list {
+			tenantOf[a.ID] = a.Tenant
+		}
 		all = append(all, list...)
 	}
 	if kind == "diff" { // FR-MON-002：增量 diff 独立实现（需 SnapStore），历史统一在此记
@@ -231,7 +237,7 @@ func (s *Service) scanAt(trigger string, specID int, kind string, visible map[st
 				sev = "critical"
 			}
 			s.alerts = append(s.alerts, Alert{Key: key, Kind: "intel_hit", Ref: h.IOC.Value,
-				AssetID: h.AssetID, Severity: sev, Confidence: h.IOC.Confidence,
+				TenantID: tenantOf[h.AssetID], AssetID: h.AssetID, Severity: sev, Confidence: h.IOC.Confidence,
 				Msg: fmt.Sprintf("情报 %s（%s）命中资产 %s：%s", h.IOC.Value, h.IOC.Threat, h.AssetID, h.Rule), TS: now})
 			newer++
 		}

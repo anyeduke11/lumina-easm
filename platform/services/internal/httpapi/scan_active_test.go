@@ -110,6 +110,38 @@ func TestScanPortEndpoint(t *testing.T) {
 	if resp, _ = post(t, srv.URL, "/v1/tenants/t-a/scan:port", "tok-admin", `{}`); resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("target 必填应 400，实际 %d", resp.StatusCode)
 	}
+	// 选项注入 target → 400（不落子进程；collect.ErrBadTarget 映射口径）
+	if resp, body = post(t, srv.URL, "/v1/tenants/t-a/scan:port", "tok-admin", `{"target":"--version"}`); resp.StatusCode != http.StatusBadRequest ||
+		!strings.Contains(body, "invalid_request") {
+		t.Errorf("选项注入 target 应 400 invalid_request: %d %s", resp.StatusCode, body)
+	}
+}
+
+// 工具未安装=能力缺失，映射 501 tool_unavailable（不是 500/空结果，不伪装成扫描失败）。
+func TestScanPortToolMissingIs501(t *testing.T) {
+	l := &audit.MemLog{}
+	led := ledger.NewService(ledger.NewMemStore(), l)
+	az := authz.NewService(authz.NewMemStore(), l)
+	ev, err := evidence.NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	col := collect.New(candidate.NewService(), led, az, ev,
+		func(context.Context, string, []string) error {
+			return fmt.Errorf("%w: nmap", collect.ErrToolMissing)
+		})
+	tokens := map[string]rbac.Principal{
+		"tok-admin": {UserID: "u7", Role: "R7", TenantIDs: []string{"*"}},
+	}
+	srv := httptest.NewServer(New(tenant.NewService(tenant.NewMemStore(), l),
+		asset.NewService(asset.NewMemStore(), l), tokens,
+		WithAuthz(az), WithLedger(led), WithCollect(col)).Handler())
+	t.Cleanup(srv.Close)
+	upsertScope(t, az, "t-a", "00:00-00:00", 0)
+	resp, body := post(t, srv.URL, "/v1/tenants/t-a/scan:port", "tok-admin", `{"target":"127.0.0.1"}`)
+	if resp.StatusCode != http.StatusNotImplemented || !strings.Contains(body, "tool_unavailable") {
+		t.Fatalf("工具缺失应 501 tool_unavailable，实际 %d %s", resp.StatusCode, body)
+	}
 }
 
 func TestScanDirEndpoint(t *testing.T) {

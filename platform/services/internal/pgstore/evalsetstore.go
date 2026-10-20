@@ -115,6 +115,50 @@ ON CONFLICT (id) DO UPDATE SET payload=EXCLUDED.payload`,
 	})
 }
 
+// PutPromote 追加放量留痕（020：动作面落痕=指标不达标不放量的执行证据）。
+func (st *EvalSetStore) PutPromote(ctx context.Context, p evalset.Promote) error {
+	reasons, _ := json.Marshal(p.Reasons)
+	th, _ := json.Marshal(p.Thresholds)
+	return st.db.withTenant(ctx, p.Tenant, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO evalset_promotes (id,tenant_id,run_id,gate_allow,reasons,thresholds,by_whom,note,ts)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9, now()))`,
+			p.ID, p.Tenant, p.RunID, p.GateAllow, reasons, th, p.By, p.Note, nullTime(p.TS))
+		return err
+	})
+}
+
+// ListPromotes 放量留痕历史（最新在前）。
+func (st *EvalSetStore) ListPromotes(ctx context.Context, tenant string, limit int) ([]evalset.Promote, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 20
+	}
+	var out []evalset.Promote
+	err := st.db.withTenant(ctx, tenant, func(tx *sql.Tx) error {
+		rs, err := tx.Query(`SELECT id,tenant_id,run_id,gate_allow,reasons,thresholds,by_whom,note,ts
+FROM evalset_promotes WHERE tenant_id=$1 ORDER BY ts DESC, id DESC LIMIT $2`, tenant, limit)
+		if err != nil {
+			return err
+		}
+		defer rs.Close()
+		for rs.Next() {
+			var (
+				p            evalset.Promote
+				reasons, th  []byte
+				note, byWhom sql.NullString
+			)
+			if err := rs.Scan(&p.ID, &p.Tenant, &p.RunID, &p.GateAllow, &reasons, &th, &byWhom, &note, &p.TS); err != nil {
+				return err
+			}
+			_ = json.Unmarshal(reasons, &p.Reasons)
+			_ = json.Unmarshal(th, &p.Thresholds)
+			p.By, p.Note = nz(byWhom), nz(note)
+			out = append(out, p)
+		}
+		return rs.Err()
+	})
+	return out, err
+}
+
 // ListRuns 运行历史（最新在前；limit 上限 500 由调用侧保证，此处硬顶）。
 func (st *EvalSetStore) ListRuns(ctx context.Context, tenant string, limit int) ([]evalset.Run, error) {
 	if limit <= 0 || limit > 500 {

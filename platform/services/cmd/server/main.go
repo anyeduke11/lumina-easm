@@ -4,52 +4,70 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"strconv"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/wangdev88/easm-platform/platform/services/internal/ai"
+	"github.com/wangdev88/easm-platform/platform/services/internal/alert"
+	"github.com/wangdev88/easm-platform/platform/services/internal/app"
 	"github.com/wangdev88/easm-platform/platform/services/internal/asset"
 	"github.com/wangdev88/easm-platform/platform/services/internal/audit"
+	"github.com/wangdev88/easm-platform/platform/services/internal/authn"
 	"github.com/wangdev88/easm-platform/platform/services/internal/authz"
 	"github.com/wangdev88/easm-platform/platform/services/internal/candidate"
 	"github.com/wangdev88/easm-platform/platform/services/internal/classify"
 	"github.com/wangdev88/easm-platform/platform/services/internal/collect"
+	"github.com/wangdev88/easm-platform/platform/services/internal/config"
+	"github.com/wangdev88/easm-platform/platform/services/internal/confirm"
+	"github.com/wangdev88/easm-platform/platform/services/internal/connector"
 	"github.com/wangdev88/easm-platform/platform/services/internal/darkweb"
+	"github.com/wangdev88/easm-platform/platform/services/internal/detect"
+	"github.com/wangdev88/easm-platform/platform/services/internal/discovery"
+	"github.com/wangdev88/easm-platform/platform/services/internal/evalset"
 	"github.com/wangdev88/easm-platform/platform/services/internal/evidence"
+	"github.com/wangdev88/easm-platform/platform/services/internal/finding"
 	"github.com/wangdev88/easm-platform/platform/services/internal/graph"
 	"github.com/wangdev88/easm-platform/platform/services/internal/httpapi"
 	"github.com/wangdev88/easm-platform/platform/services/internal/ingest"
 	"github.com/wangdev88/easm-platform/platform/services/internal/intel"
+	"github.com/wangdev88/easm-platform/platform/services/internal/inventory"
+	"github.com/wangdev88/easm-platform/platform/services/internal/job"
 	"github.com/wangdev88/easm-platform/platform/services/internal/ledger"
-	"github.com/wangdev88/easm-platform/platform/services/internal/mcp"
+	"github.com/wangdev88/easm-platform/platform/services/internal/mm"
 	"github.com/wangdev88/easm-platform/platform/services/internal/monitor"
 	"github.com/wangdev88/easm-platform/platform/services/internal/notice"
 	"github.com/wangdev88/easm-platform/platform/services/internal/notify"
 	"github.com/wangdev88/easm-platform/platform/services/internal/ownership"
 	"github.com/wangdev88/easm-platform/platform/services/internal/pgstore"
 	"github.com/wangdev88/easm-platform/platform/services/internal/plugin"
+	"github.com/wangdev88/easm-platform/platform/services/internal/projection"
 	"github.com/wangdev88/easm-platform/platform/services/internal/rbac"
 	"github.com/wangdev88/easm-platform/platform/services/internal/report"
 	"github.com/wangdev88/easm-platform/platform/services/internal/scoring"
 	"github.com/wangdev88/easm-platform/platform/services/internal/secret"
-	"github.com/wangdev88/easm-platform/platform/services/internal/evalset"
 	"github.com/wangdev88/easm-platform/platform/services/internal/shadowit"
 	"github.com/wangdev88/easm-platform/platform/services/internal/sweep"
 	"github.com/wangdev88/easm-platform/platform/services/internal/tdispatcher"
 	"github.com/wangdev88/easm-platform/platform/services/internal/tenant"
+	"github.com/wangdev88/easm-platform/platform/services/internal/usage"
 	"github.com/wangdev88/easm-platform/platform/services/internal/verifier"
 	"github.com/wangdev88/easm-platform/platform/services/internal/vuln"
 	"github.com/wangdev88/easm-platform/platform/services/internal/workorder"
 )
 
 func main() {
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("配置装载失败（fail loud）: %v", err)
 	}
+	port := cfg.Port
+	log.Printf("config: %s", cfg.Redacted())
 
 	alog := audit.Log(&audit.MemLog{})
 
@@ -68,8 +86,8 @@ func main() {
 	var notStore notice.Store = notice.NewMemStore()      // 012：线索通报（PG 模式替换，CR-002 三要素跨重启锁定留存）
 	var rptStore report.Store = report.NewMemStore()      // 013：报告历史（V-3 PG 化，对外交付物不随进程蒸发）
 	var pgDB *pgstore.DB                                  // PG 句柄（008/009 端口装配）；nil=内存模式
-	if dsn := os.Getenv("EASM_PG_DSN"); dsn != "" {
-		pg, err := pgstore.Open(dsn)
+	if cfg.PGDSN != "" {
+		pg, err := pgstore.Open(cfg.PGDSN)
 		if err != nil {
 			log.Fatalf("EASM_PG_DSN 已设置但连接失败: %v", err)
 		}
@@ -102,6 +120,51 @@ func main() {
 		pathQuery = graph.NewMemPath(gms)
 	}
 
+	// Phase 1 EASM 核心：资产身份/观察流、Finding、Job Queue、发现 Connector。
+	var invStore inventory.Store = inventory.NewMemStore()
+	var findStore finding.Store = finding.NewMemStore()
+	var jobStore job.Store = job.NewMemStore()
+	var alertStore alert.Store = alert.NewMemStore()
+	if pgDB != nil {
+		invStore, findStore, jobStore, alertStore = pgDB.Inventory(), pgDB.Findings(), pgDB.Jobs(), pgDB.Alerts()
+	}
+	invSvc := inventory.New(invStore, alog)
+	findSvc := finding.New(findStore, alog)
+	jobSvc := job.New(jobStore, alog)
+	alertSvc := alert.New(alertStore, alog)
+	detSvc := detect.New(findSvc).WithAlerts(alertSvc)
+	connReg := connector.NewRegistry()
+	if err := connReg.Register(connector.Seed{}); err != nil {
+		log.Fatalf("connector seed 注册失败: %v", err)
+	}
+	if err := connReg.Register(connector.NewCT()); err != nil {
+		log.Fatalf("connector ct 注册失败: %v", err)
+	}
+	if err := connReg.Register(connector.NewDNS()); err != nil {
+		log.Fatalf("connector dns 注册失败: %v", err)
+	}
+	if cfg.ASMURL != "" {
+		asm, err := connector.NewASM(cfg.ASMURL, cfg.ASMToken)
+		if err != nil {
+			log.Fatalf("connector asm 配置失败: %v", err)
+		}
+		if err := connReg.Register(asm); err != nil {
+			log.Fatalf("connector asm 注册失败: %v", err)
+		}
+		log.Printf("connector: asm enabled url=%s", cfg.ASMURL)
+	}
+	if cfg.CloudURL != "" {
+		cloud, err := connector.NewCloud(cfg.CloudURL, cfg.CloudToken)
+		if err != nil {
+			log.Fatalf("connector cloud 配置失败: %v", err)
+		}
+		if err := connReg.Register(cloud); err != nil {
+			log.Fatalf("connector cloud 注册失败: %v", err)
+		}
+		log.Printf("connector: cloud enabled url=%s", cfg.CloudURL)
+	}
+	discSvc := discovery.New(invSvc, graphSvc, jobSvc, connReg).WithAudit(alog).WithFindings(findSvc).WithDetector(detSvc)
+
 	tsvc := tenant.NewService(tstore, alog)
 	asvc := asset.NewService(astore, alog)
 	if assetSync != nil {
@@ -109,11 +172,12 @@ func main() {
 	}
 	// 风险台账（F4）
 	ledSvc := ledger.NewService(lstore, alog)
+	projSvc := projection.New(ledSvc)
 	// 门3 沙箱复测 provider（ENH-10 前端接缝）：EASM_SANDBOX_URL 装载外部沙箱服务——
 	// 隔离微 VM 池/interactsh 回连/非破坏性（NFR-SEC-010）/证据 WORM/高危人工审批（AX-5）
 	// 由沙箱服务侧承担；平台侧对回执做同等硬闸（verifier 包）。
 	// 未设置时 method=sandbox 返回 501（fail loud，禁止造假闭环）；manual/cross_tool 不受影响。
-	if sbURL := os.Getenv("EASM_SANDBOX_URL"); sbURL != "" {
+	if sbURL := cfg.SandboxURL; sbURL != "" {
 		sb, err := verifier.NewSandbox(sbURL)
 		if err != nil {
 			log.Fatalf("沙箱 provider 装载失败: %v", err)
@@ -133,7 +197,7 @@ func main() {
 	plugins := plugin.NewRegistry()
 	// ENH-01 编排派发器（配置 EASM_TEMPORAL_HOST 即装载；未配置=进程内回退，接缝不变）
 	var dispatcher httpapi.SweepDispatcher
-	if host := os.Getenv("EASM_TEMPORAL_HOST"); host != "" {
+	if host := cfg.TemporalHost; host != "" {
 		d, err := tdispatcher.New(host)
 		if err != nil {
 			log.Fatalf("EASM_TEMPORAL_HOST=%s 已设置但连接失败（fail loud，拒绝静默回退）: %v", host, err)
@@ -171,44 +235,63 @@ func main() {
 	})
 	monSvc.Start(context.Background())
 	if pgDB != nil {
-		monSvc.SetSnapStore(pgDB.Snapshots()) // 008：FR-MON-002 diff 基线跨扫描持久
+		monSvc.SetSnapStore(pgDB.Snapshots())       // 008：FR-MON-002 diff 基线跨扫描持久
+		monSvc.AttachTaskStore(pgDB.MonitorTasks()) // 021：FR-MON-003 排查任务单跨重启可查
 	}
 	// 告警统一出口（F14.4）：通道经 env 配置；G8-02 前仅内部/自管渠道（webhook 含钉钉/飞书机器人形态）
 	notiSvc := notify.New()
-	if u := os.Getenv("EASM_ALERT_WEBHOOK"); u != "" {
+	if u := cfg.AlertWebhook; u != "" {
 		notiSvc.AddChannel("webhook", notify.Webhook(u))
 	}
-	if to := os.Getenv("EASM_ALERT_MAIL_TO"); to != "" {
-		notiSvc.AddChannel("mail", notify.SMTPSender(envOr("EASM_ALERT_MAIL_FROM", "easm@localhost"), to, nil))
+	if to := cfg.AlertMailTo; to != "" {
+		notiSvc.AddChannel("mail", notify.SMTPSender(cfg.AlertMailFrom, to, nil))
+	}
+	// M4-04 SOAR 联动通道：URL+密钥同设才装配；单设=配置不完整 fail loud（拒绝半可用）。
+	if u, sec := cfg.SOARWebhook, cfg.SOARSecret; u != "" || sec != "" {
+		if u == "" || sec == "" {
+			log.Fatalf("EASM_SOAR_WEBHOOK 与 EASM_SOAR_SECRET 必须同设（HMAC 验签缺一不可）")
+		}
+		notiSvc.AddChannel("soar", notify.SOAR(u, sec))
 	}
 	if pgDB != nil {
 		if err := notiSvc.AttachLog(pgDB.NotifyLog()); err != nil { // 009：跨重启去重+留痕
 			log.Fatalf("notify 历史接 PG 失败: %v", err)
 		}
 	}
+	alertSvc.WithNotifier(notiSvc).WithAutoDispatch(true)
+
+	// M4-07：AI 面计量与预算（FR-HRN-10 P1）——事件/预算落 PG（022，未装 PG=进程内回退）；
+	// 预算告警经 notify 统一出口（通道未配置=告警仅状态可见，如实标注不冒充管控）。
+	var usageStore usage.Store = usage.NewMemStore()
+	if pgDB != nil {
+		usageStore = pgDB.Usage()
+	}
+	usageSvc := usage.New(usageStore).WithSink(func(ctx context.Context, a usage.Alert) error {
+		ma := monitor.Alert{Kind: a.Kind, Key: a.Key, TenantID: a.TenantID,
+			Severity: "medium", Msg: a.Msg, TS: time.Now().UTC()}
+		_, _, err := notiSvc.Dispatch(ctx, "webhook", []monitor.Alert{ma})
+		return err
+	})
 
 	// 证据对象存储（ENH-05）：EASM_EVIDENCE=minio 装载 MinIO/S3；默认 file=本地文件（MVP 过渡形态）。
 	// 接缝不变（evidence.Store），Provider 由 env 切换（设计方案 §4.2）；装载失败一律 fail loud。
 	var evidSvc evidence.Store
-	switch mode := envOr("EASM_EVIDENCE", "file"); mode {
+	switch mode := cfg.EvidenceMode; mode {
 	case "minio":
-		ep := envOr("EASM_MINIO_ENDPOINT", "127.0.0.1:9000")
-		bk := envOr("EASM_MINIO_BUCKET", "easm-evidence")
-		st, err := evidence.NewMinIOStore(ep, os.Getenv("EASM_MINIO_AK"), os.Getenv("EASM_MINIO_SK"),
-			bk, envOr("EASM_MINIO_SSL", "false") == "true")
+		st, err := evidence.NewMinIOStore(cfg.MinioEndpoint, cfg.MinioAK, cfg.MinioSK,
+			cfg.MinioBucket, cfg.MinioSSL)
 		if err != nil {
 			log.Fatalf("证据存储 minio 装载失败（fail loud，拒绝静默降级）: %v", err)
 		}
 		evidSvc = st
-		log.Printf("evidence backend=minio endpoint=%s bucket=%s", ep, bk)
+		log.Printf("evidence backend=minio endpoint=%s bucket=%s", cfg.MinioEndpoint, cfg.MinioBucket)
 	case "file":
-		root := envOr("EASM_EVIDENCE_DIR", "evidence-store")
-		st, err := evidence.NewFileStore(root)
+		st, err := evidence.NewFileStore(cfg.EvidenceDir)
 		if err != nil {
 			log.Fatalf("证据存储 file 装载失败: %v", err)
 		}
 		evidSvc = st
-		log.Printf("evidence backend=file root=%s（MVP 过渡；ENH-05 正式形态=minio）", root)
+		log.Printf("evidence backend=file root=%s（MVP 过渡；ENH-05 正式形态=minio）", cfg.EvidenceDir)
 	default:
 		log.Fatalf("EASM_EVIDENCE 非法取值：%q（须 file|minio）", mode)
 	}
@@ -217,16 +300,12 @@ func main() {
 	// EASM_VERIFY_CMD 装载本机复测命令——ulimit 文件空间 + nice 优先级 + 超时 + 一次性工作区，
 	// 产物入 evidence WORM（C-5）。与 EASM_SANDBOX_URL 互斥（HTTP provider 优先，先到先得）。
 	// 复测契约：<cmd> <item_id> <tenant> <workdir>，工作区写 result.txt（reproduced|refuted|inconclusive）。
-	if os.Getenv("EASM_SANDBOX_URL") == "" {
-		if vcmd := os.Getenv("EASM_VERIFY_CMD"); vcmd != "" {
-			to, err := time.ParseDuration(envOr("EASM_VERIFY_TIMEOUT", "10m"))
-			if err != nil {
-				log.Fatalf("EASM_VERIFY_TIMEOUT 非法: %v", err)
-			}
-			lv, err := verifier.NewLocal(vcmd, envOr("EASM_VERIFY_WORKSPACE", "/tmp/easm-verify"), evidSvc,
-				verifier.WithFSizeMB(atoiOr(envOr("EASM_VERIFY_FSIZE_MB", "64"), 64)),
-				verifier.WithNice(atoiOr(envOr("EASM_VERIFY_NICE", "19"), 19)),
-				verifier.WithTimeout(to))
+	if cfg.SandboxURL == "" {
+		if vcmd := cfg.VerifyCmd; vcmd != "" {
+			lv, err := verifier.NewLocal(vcmd, cfg.VerifyWorkspace, evidSvc,
+				verifier.WithFSizeMB(cfg.VerifyFSizeMB),
+				verifier.WithNice(cfg.VerifyNice),
+				verifier.WithTimeout(cfg.VerifyTimeout))
 			if err != nil {
 				log.Fatalf("简单隔离复测 provider 装载失败（fail loud）: %v", err)
 			}
@@ -235,15 +314,28 @@ func main() {
 		}
 	}
 
-	tokens := parseTokens(os.Getenv("EASM_DEV_TOKENS"))
-	if len(tokens) == 0 {
+	tokens := parseTokens(cfg.DevTokens)
+	if cfg.SingleUser {
+		if cfg.DevTokens == "" && cfg.OIDCIssuer == "" {
+			log.Fatalf("EASM_SINGLE_USER=1 需要 EASM_DEV_TOKENS 或 OIDC（否则无人可登录）")
+		}
+		if cfg.DevTokens != "" {
+			var err error
+			tokens, err = singleUserTokens(tokens)
+			if err != nil {
+				log.Fatalf("EASM_SINGLE_USER=1 配置非法（fail loud）: %v", err)
+			}
+			log.Printf("single-user mode: 1 operator token, role=admin（多用户 RBAC 不对外暴露；entity 数据域仍按 tenant/RLS 隔离）")
+		}
+	}
+	if len(tokens) == 0 && cfg.OIDCIssuer == "" {
 		log.Printf("warn: EASM_DEV_TOKENS 未设置，所有请求将 401（仅影响 dev，见 Makefile run 目标）")
 	}
 	// V-8 dev 令牌能力边界（ENH-07 OIDC 未接入期间的显式声明，禁止静默）：
 	// 静态 bearer 令牌=无过期/无作用域/无吊销，仅适用内网或离线验证环境；
 	// 对外多租户接入前必须替换为 OIDC（ENH-07），生产环境直接拒绝启动（fail loud）。
 	if len(tokens) > 0 {
-		if os.Getenv("EASM_ENV") == "production" {
+		if cfg.Env == "production" {
 			log.Fatalf("EASM_ENV=production 禁用 dev 静态令牌（EASM_DEV_TOKENS）：无过期/无吊销/无作用域，对外环境必须走 OIDC（ENH-07）")
 		}
 		log.Printf("warn: dev 静态令牌已启用（%d 枚，ENH-07 OIDC 未接入）——能力边界：无过期/无吊销/无作用域，仅限内网或离线验证；对外多租户接入前必须替换为 OIDC", len(tokens))
@@ -286,8 +378,9 @@ func main() {
 	// 度量不随进程蒸发）；外呼**默认关闭**，仅 EASM_SECRET_PROBE=1 显式开启时
 	// 才对请求方显式给出的目标发起非破坏 GET（AX-5 人在环，不自行推断外呼目标）。
 	secretSvc := secret.New().WithGraph(graphSvc)
-	if os.Getenv("EASM_SECRET_PROBE") == "1" {
-		secretSvc = secretSvc.WithProber(secret.NewHTTPProber(8*time.Second, nil))
+	if cfg.SecretProbe {
+		secretSvc = secretSvc.WithProber(secret.NewHTTPProber(8*time.Second, nil).
+			WithPrivateTargets(cfg.SecretProbePrivate))
 	}
 	// M3-C：影子 IT 收敛建议与纳管人审面（FR-MIN-003；与主链路共用同一归属判定实例）
 	shadowSvc := shadowit.New(ownSvc)
@@ -300,7 +393,7 @@ func main() {
 		evalStore = pgDB.EvalSet()
 	}
 	evalSvc := evalset.New(evalStore)
-	if raw := os.Getenv("EASM_EVAL_THRESHOLDS"); raw != "" {
+	if raw := cfg.EvalThresholds; raw != "" {
 		th, err := evalset.ParseThresholds(raw)
 		if err != nil {
 			log.Fatalf("EASM_EVAL_THRESHOLDS 非法: %v", err)
@@ -308,69 +401,141 @@ func main() {
 		evalSvc = evalSvc.WithThresholds(th)
 	}
 
-	srv := &http.Server{
-		Addr:              ":" + port,
-		Handler:           newRouter(tsvc, asvc, ledSvc, sweepSvc, authzSvc, plugins, vulnSvc, intelSvc, ownSvc, monSvc, notiSvc, evidSvc, candSvc, colSvc, darkSvc, woSvc, notSvc, rptSvc, dispatcher, tokens, graphQuery, pathQuery, secretSvc, shadowSvc, evalSvc),
-		ReadHeaderTimeout: 5 * time.Second,
+	// ENH-03：AI 推理面接缝（Provider=SenseNova，OpenAI 兼容 chat；后续内网模型等
+	// 实现同一 ai.Provider 接口替换装配，上层零改动）。三件套（BASE_URL/MODEL/API_KEY）
+	// 须同设才装配；任一设置而 API_KEY 缺失=fail loud（拒绝半可用）；全未设=能力边界
+	// （mm:analyze / shadow with_ai 返 501，不静默降级）。密钥只走 env，不落日志不落代码。
+	var aiProv ai.Provider
+	if cfg.AIAPIKey != "" {
+		aiCfg := ai.Config{BaseURL: cfg.AIBaseURL, Model: cfg.AIModel, APIKey: cfg.AIAPIKey}
+		if err := aiCfg.Validate(); err != nil {
+			log.Fatalf("EASM_AI_* 配置非法: %v", err)
+		}
+		p, err := ai.NewSenseNova(aiCfg, 60*time.Second)
+		if err != nil {
+			log.Fatalf("AI provider 装载失败: %v", err)
+		}
+		aiProv = p
+		log.Printf("ENH-03 AI 面已装配 provider=sensenova model=%s（M3-D 多模态判敏 + M3-C-AI 文案）", aiCfg.Model)
 	}
-	log.Printf("easm services listening on :%s backend=%s (dev tokens=%d)", port, backend, len(tokens))
-	if err := srv.ListenAndServe(); err != nil {
-		log.Fatal(err)
+	// M3-D 多模态判敏（AIL-5/6：富化结果进图谱且可解释；AI 结论不入台账）。
+	mmSvc := mm.New(aiProv, graphSvc)
+	if aiProv != nil {
+		shadowSvc = shadowSvc.WithAI(aiProv) // M3-C-AI：建议文案接缝（红线由域层保证）
 	}
-}
+	mmSvc.SetUsage(usageSvc)                  // M4-07：mm 判敏按租户计量
+	shadowSvc = shadowSvc.WithUsage(usageSvc) // M4-07：with_ai 文案按租户计量
 
-// monitorPrincipal 调度器系统主体（等同 R7 全量视角；仅用于 provider 取数，
-// 请求级端点仍按请求主体过滤）。
-var monitorPrincipal = rbac.Principal{UserID: "monitor-scheduler", Role: "R7", TenantIDs: []string{"*"}}
+	// 单用户高危动作确认（FR-LGR-005/CR-001/AX-5）：PG 模式落库，内存模式回退。
+	// 默认开启：scan.port/scan.dir/notice.create 必须携带 X-EASM-Confirmation（REST/MCP 同闸）；
+	// 仅以 EASM_REQUIRE_CONFIRMATION=0 显式降级。
+	var confirmStore confirm.Store = confirm.NewMemStore()
+	if pgDB != nil {
+		confirmStore = pgDB.Confirmations()
+	}
+	confirmSvc := confirm.New(confirmStore, alog)
+	confirmRequired := cfg.RequireConfirmation
+	if confirmRequired {
+		log.Printf("single-user confirmation: required for scan.port/scan.dir/notice.create")
+	}
 
-// newRouter 组装 REST（/v1/*, /healthz）、MCP（/mcp）与自研控制台静态面（WP-M0-07）。
-func newRouter(t *tenant.Service, a *asset.Service, led *ledger.Service, sv *sweep.Service, az *authz.Service, plg *plugin.Registry, v *vuln.Service, i *intel.Service, o *ownership.Service, m *monitor.Service, n *notify.Service, ev evidence.Store, cd *candidate.Service, col *collect.Service, dark *darkweb.Service, ws *workorder.Service, nn *notice.Service, rpt *report.Service, d httpapi.SweepDispatcher, tokens map[string]rbac.Principal, gq httpapi.GraphQuery, pq graph.PathQuery, sev *secret.Service, shv *shadowit.Service, evs *evalset.Service) http.Handler {
-	// M3-A 评分口径（FR-MIN-001/002）：env 注入权重/阈值（GAP-8 G8-01 定稿后仅换配置；
-	// 非法配置装载即拒=fail loud；未配置=默认登记口径并在 API 标注「待 G8-01 定稿」）。
+	// OIDC / break-glass：OIDC 三件套已由 config 校验；break-glass 只存 hash。
+	var oidc *authn.OIDC
+	if cfg.OIDCIssuer != "" {
+		oidc, err = authn.NewOIDC(cfg.OIDCIssuer, cfg.OIDCAudience, cfg.OIDCJWKSURL)
+		if err != nil {
+			log.Fatalf("OIDC 装载失败（fail loud）: %v", err)
+		}
+		log.Printf("authn: OIDC enabled issuer=%s audience=%s", cfg.OIDCIssuer, cfg.OIDCAudience)
+	}
+	var bg *authn.BreakGlass
+	if cfg.BreakGlassHash != "" {
+		bg, err = authn.NewBreakGlass(cfg.BreakGlassHash, alog)
+		if err != nil {
+			log.Fatalf("break-glass 装载失败（fail loud）: %v", err)
+		}
+		log.Printf("authn: break-glass enabled（每次使用写审计）")
+	}
+	var pk *authn.Passkey
+	if cfg.PasskeyPublicKey != "" {
+		pk, err = authn.NewPasskey(cfg.PasskeyPublicKey)
+		if err != nil {
+			log.Fatalf("passkey 装载失败（fail loud）: %v", err)
+		}
+		log.Printf("authn: passkey enabled（ES256 challenge-response；WebAuthn 为 Provider 替换）")
+	}
+
+	// M3-A 评分口径（FR-MIN-001/002）：配置注入权重/阈值；非法即 fail loud。
 	scoreW, scoreTh := scoring.DefaultWeights(), scoring.DefaultThresholds()
-	if raw := os.Getenv("EASM_SCORE_WEIGHTS"); raw != "" {
+	if raw := cfg.ScoreWeights; raw != "" {
 		w, err := scoring.ParseWeights(raw)
 		if err != nil {
 			log.Fatalf("EASM_SCORE_WEIGHTS 非法: %v", err)
 		}
 		scoreW = w
 	}
-	if raw := os.Getenv("EASM_SCORE_THRESHOLDS"); raw != "" {
+	if raw := cfg.ScoreThresholds; raw != "" {
 		th, err := scoring.ParseThresholds(raw)
 		if err != nil {
 			log.Fatalf("EASM_SCORE_THRESHOLDS 非法: %v", err)
 		}
 		scoreTh = th
 	}
-	api := httpapi.New(t, a, tokens, httpapi.WithGraph(gq), httpapi.WithLedger(led), httpapi.WithSweep(sv), httpapi.WithAuthz(az), httpapi.WithPlugins(plg), httpapi.WithKnowledge(v, i, o), httpapi.WithMonitor(m), httpapi.WithNotify(n), httpapi.WithEvidence(ev), httpapi.WithCandidates(cd), httpapi.WithCollect(col), httpapi.WithDarkweb(dark), httpapi.WithWorkOrders(ws), httpapi.WithNotice(nn), httpapi.WithReport(rpt), httpapi.WithSweepDispatcher(d), httpapi.WithScoring(scoreW, scoreTh), httpapi.WithPaths(pq), httpapi.WithSecret(sev), httpapi.WithShadow(shv), httpapi.WithEval(evs)).Handler()
-	mcpH := mcp.New(t, a, tokens, mcp.WithLedger(led), mcp.WithSweep(sv)).Handler()
-	console := http.FileServer(http.Dir(envOr("EASM_CONSOLE_DIR", "console")))
-	mux := http.NewServeMux()
-	mux.Handle("/mcp", mcpH)
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		p := r.URL.Path
-		if strings.HasPrefix(p, "/v1/") || p == "/healthz" {
-			api.ServeHTTP(w, r)
-			return
+
+	// /readyz 真实依赖探活：PG 模式 Ping 数据库；内存模式无外部依赖（nil=ready）。
+	var ready func(context.Context) error
+	if pgDB != nil {
+		ready = pgDB.Ping
+	}
+
+	srv := &http.Server{
+		Addr: ":" + port,
+		Handler: app.Deps{
+			Tenants: tsvc, Assets: asvc, Ledger: ledSvc, Sweep: sweepSvc, Authz: authzSvc,
+			Plugins: plugins, Vuln: vulnSvc, Intel: intelSvc, Ownership: ownSvc, Monitor: monSvc,
+			Notify: notiSvc, Evidence: evidSvc, Candidate: candSvc, Collect: colSvc,
+			Darkweb: darkSvc, WorkOrder: woSvc, Notice: notSvc, Report: rptSvc,
+			Dispatcher: dispatcher, Tokens: tokens, GraphQuery: graphQuery, PathQuery: pathQuery,
+			Secret: secretSvc, Shadow: shadowSvc, Eval: evalSvc, MM: mmSvc, Usage: usageSvc,
+			Confirm: confirmSvc, ConfirmRequired: confirmRequired,
+			OIDC: oidc, BreakGlass: bg, Passkey: pk,
+			Inventory: invSvc, Findings: findSvc, Jobs: jobSvc, Discovery: discSvc, Projection: projSvc, Alerts: alertSvc, Detector: detSvc,
+			AssetStale: cfg.AssetStaleAfter, AssetRetire: cfg.AssetRetireAfter,
+			ScoreWeights: scoreW, ScoreThresholds: scoreTh,
+			Audit: alog, ConsoleDir: cfg.ConsoleDir, Ready: ready,
+		}.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+	log.Printf("easm services listening on :%s backend=%s (dev tokens=%d)", port, backend, len(tokens))
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("server: %v", err)
 		}
-		console.ServeHTTP(w, r)
-	})
-	return mux
+	case <-ctx.Done():
+		log.Printf("shutdown: 收到退出信号，停止接收新请求（超时 10s）")
+		sdCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(sdCtx); err != nil {
+			log.Printf("shutdown: 优雅停机失败（强制退出）: %v", err)
+		}
+		if pgDB != nil {
+			if err := pgDB.Close(); err != nil {
+				log.Printf("shutdown: 关闭 PG 连接池失败: %v", err)
+			}
+		}
+		log.Printf("shutdown: 已退出")
+	}
 }
 
-func envOr(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
-}
-
-func atoiOr(s string, def int) int {
-	if n, err := strconv.Atoi(s); err == nil && n >= 0 {
-		return n
-	}
-	return def
-}
+// monitorPrincipal 调度器系统主体（等同 R7 全量视角；仅用于 provider 取数，
+// 请求级端点仍按请求主体过滤）。
+var monitorPrincipal = rbac.Principal{UserID: "monitor-scheduler", Role: "R7", TenantIDs: []string{"*"}}
 
 // parseTokens 解析 "token:role:t1|t2,token2:R7:*"。仅供 dev；生产走 OIDC（NFR-SEC-002）。
 func parseTokens(spec string) map[string]rbac.Principal {
@@ -393,4 +558,19 @@ func parseTokens(spec string) map[string]rbac.Principal {
 		out[parts[0]] = rbac.Principal{UserID: "dev-" + parts[0], Role: parts[1], TenantIDs: tenants}
 	}
 	return out
+}
+
+// singleUserTokens 单用户监管形态：恰好一枚操作员令牌，角色固定 admin。
+// 多用户 RBAC 保留在内部作为纵深防御，但不对外暴露多账号入口。
+func singleUserTokens(in map[string]rbac.Principal) (map[string]rbac.Principal, error) {
+	if len(in) != 1 {
+		return nil, fmt.Errorf("EASM_SINGLE_USER=1 要求恰好一枚 EASM_DEV_TOKENS（当前 %d 枚）；单用户模式不暴露多账号", len(in))
+	}
+	out := make(map[string]rbac.Principal, 1)
+	for k, p := range in {
+		p.Role = "admin"
+		p.TenantIDs = []string{"*"}
+		out[k] = p
+	}
+	return out, nil
 }

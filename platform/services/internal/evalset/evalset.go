@@ -40,6 +40,9 @@ const (
 // ErrNoSamples 空评测集（对空集算 F1 是伪造统计，必须拒绝）。
 var ErrNoSamples = errors.New("evalset: 评测集为空，先导入/回流样本再评测")
 
+// ErrGateBlocked 放量门禁未放行（指标不达标不放量；AIL-7 动作面执行点）。
+var ErrGateBlocked = errors.New("evalset: 放量门禁未放行（指标不达标不放量）")
+
 // ErrSampleNotFound 样本不存在（二次标注指向了别的租户或不存在的 ID）。
 var ErrSampleNotFound = errors.New("evalset: 样本不存在")
 
@@ -203,6 +206,19 @@ type Run struct {
 	Basis             string       `json:"basis"`
 }
 
+// Promote 一次灰度放量登记（动作留痕：谁在哪个门禁判定下放量；AIL-7 动作面）。
+type Promote struct {
+	ID         string     `json:"id"`
+	Tenant     string     `json:"tenant"`
+	RunID      string     `json:"run_id"` // 放行依据=该次评测运行
+	GateAllow  bool       `json:"gate_allow"`
+	Reasons    []string   `json:"reasons"`
+	Thresholds Thresholds `json:"thresholds"` // 放行时的阈值口径（换配置前后可对账）
+	By         string     `json:"by"`
+	Note       string     `json:"note,omitempty"`
+	TS         time.Time  `json:"ts"`
+}
+
 // Store 持久化接口：内存实现随包提供；PG 实现在 pgstore（双后端同契约，C-6）。
 type Store interface {
 	PutSample(ctx context.Context, s Sample) (created bool, err error)
@@ -210,6 +226,8 @@ type Store interface {
 	AppendRelabel(ctx context.Context, tenant, sampleID string, rl Relabel) error
 	PutRun(ctx context.Context, r Run) error
 	ListRuns(ctx context.Context, tenant string, limit int) ([]Run, error)
+	PutPromote(ctx context.Context, p Promote) error
+	ListPromotes(ctx context.Context, tenant string, limit int) ([]Promote, error)
 }
 
 // RefluxResult 回流结果（幂等：重放 added=0；无信号条目单列跳过）。
@@ -469,6 +487,38 @@ func (s *Service) Runs(ctx context.Context, tenant string, limit int) ([]Run, er
 	return s.store.ListRuns(ctx, tenant, limit)
 }
 
+// Promote 灰度放量动作（AIL-7 动作面执行点）：消费门禁判定——未放行=ErrGateBlocked
+// （403，机器可读理由随行）；放行才落留痕（谁在哪个 run 下放量、阈值口径快照），可审计可对账。
+func (s *Service) Promote(ctx context.Context, tenant, by, note string) (Promote, GateDecision, error) {
+	if strings.TrimSpace(by) == "" {
+		return Promote{}, GateDecision{}, fmt.Errorf("%w: 放量人必填（人在环可追溯）", ErrInvalid)
+	}
+	run, d, err := s.Check(ctx, tenant)
+	if err != nil {
+		return Promote{}, GateDecision{}, err
+	}
+	if !d.Allow {
+		return Promote{}, d, ErrGateBlocked
+	}
+	p := Promote{
+		ID:     "EP-" + sha12(tenant+"|"+run.ID+"|"+by+"|"+time.Now().UTC().Format(time.RFC3339Nano)),
+		Tenant: tenant, RunID: run.ID, GateAllow: true,
+		Reasons: []string{}, Thresholds: d.Thresholds, By: by, Note: note, TS: time.Now().UTC(),
+	}
+	if err := s.store.PutPromote(ctx, p); err != nil {
+		return Promote{}, d, err
+	}
+	return p, d, nil
+}
+
+// Promotes 放量留痕历史（最新在前）。
+func (s *Service) Promotes(ctx context.Context, tenant string, limit int) ([]Promote, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 20
+	}
+	return s.store.ListPromotes(ctx, tenant, limit)
+}
+
 // Check 放量门禁检查：返回最近一次运行及其判定；无记录 fail closed（不放量）。
 func (s *Service) Check(ctx context.Context, tenant string) (Run, GateDecision, error) {
 	rs, err := s.store.ListRuns(ctx, tenant, 1)
@@ -477,8 +527,8 @@ func (s *Service) Check(ctx context.Context, tenant string) (Run, GateDecision, 
 	}
 	if len(rs) == 0 {
 		return Run{}, GateDecision{
-			Allow: false,
-			Reasons: []string{"无评测记录——放量门禁 fail closed（先导入/回流样本并执行评测）"},
+			Allow:      false,
+			Reasons:    []string{"无评测记录——放量门禁 fail closed（先导入/回流样本并执行评测）"},
 			Thresholds: s.th, ThresholdSrc: s.thSrc,
 			Basis: "无评测不放量：门禁对「没有证据的放行」同样视为不可验证主张（AX-3）",
 		}, nil

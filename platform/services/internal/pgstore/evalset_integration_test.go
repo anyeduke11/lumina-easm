@@ -24,9 +24,11 @@ func TestEvalSetStoreRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	st, st2 := db.EvalSet(), db2.EvalSet()
 	t.Cleanup(func() {
+		_, _ = db.sql.Exec(`DELETE FROM evalset_promotes WHERE tenant_id LIKE 'itest%'`)
 		_, _ = db.sql.Exec(`DELETE FROM evalset_samples WHERE tenant_id LIKE 'itest%'`)
 		_, _ = db.sql.Exec(`DELETE FROM evalset_runs WHERE tenant_id LIKE 'itest%'`)
 	})
+	_, _ = db.sql.Exec(`DELETE FROM evalset_promotes WHERE tenant_id LIKE 'itest%'`)
 	_, _ = db.sql.Exec(`DELETE FROM evalset_samples WHERE tenant_id LIKE 'itest%'`)
 	_, _ = db.sql.Exec(`DELETE FROM evalset_runs WHERE tenant_id LIKE 'itest%'`)
 
@@ -72,5 +74,19 @@ func TestEvalSetStoreRoundTrip(t *testing.T) {
 	if err != nil || len(rs) != 1 || rs[0].ID != run.ID || rs[0].Total != 1 ||
 		len(rs[0].Gate.Reasons) != 1 {
 		t.Fatalf("运行记录跨进程回读失败: %+v %v", rs, err)
+	}
+	// 放量留痕（020 / ENH-03）：跨进程落痕 + 阈值口径快照回读
+	p := evalset.Promote{
+		ID: "EP-itest0001", Tenant: "itest-eval", RunID: run.ID, GateAllow: true,
+		Reasons: []string{}, Thresholds: evalset.DefaultThresholds(),
+		By: "u1", Note: "灰度放量示证", TS: time.Now().UTC(),
+	}
+	if err := st.PutPromote(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	ps, err := st2.ListPromotes(ctx, "itest-eval", 10)
+	if err != nil || len(ps) != 1 || ps[0].ID != p.ID || ps[0].RunID != run.ID ||
+		!ps[0].GateAllow || ps[0].By != "u1" || ps[0].Thresholds != evalset.DefaultThresholds() {
+		t.Fatalf("放量留痕跨进程回读失败: %+v %v", ps, err)
 	}
 }

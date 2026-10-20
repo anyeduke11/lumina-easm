@@ -1,5 +1,5 @@
 /* ============================================================
-   Sentinel EASM — AI Native 外部攻击面管理系统
+   Lumina EASM — AI Native 外部攻击面管理系统
    ------------------------------------------------------------
    Part 1 · DATA LAYER    多租户 / 资产 / 漏洞库 / 情报库 / 报告
    Part 2 · APP LOGIC     渲染 / 路由 / 交互
@@ -1180,6 +1180,7 @@ function pad2(n) { return n < 10 ? '0' + n : '' + n; }
 const state = {
   tenant: 'all',
   view: 'overview',
+  scopeTenant: 'all',
   assetFilter: 'all', assetSort: 'risk', assetSearch: '',
   vulnFilter: 'all', intelFilter: 'all',
   rptSections: { exec:true, kpi:true, risk:true, path:true, vuln:true, intel:true, advice:true, appendix:false },
@@ -1316,8 +1317,15 @@ function renderOverview() {
   const unowned = list.filter(function (a) { return a.owner === '未归属'; }).length;
   const totalAssets = t ? t.totalAssets : TENANTS.reduce(function (s, x) { return s + x.totalAssets; }, 0);
   const shadow = t ? t.shadow : TENANTS.reduce(function (s, x) { return s + x.shadow; }, 0);
-  const score = t ? t.score : Math.round(TENANTS.reduce(function (s, x) { return s + x.score * x.totalAssets; }, 0) / totalAssets * 10) / 10;
-  const closed = t ? t.closed : Math.round(TENANTS.reduce(function (s, x) { return s + x.closed * x.totalAssets; }, 0) / totalAssets * 10) / 10;
+  /* 全部单位视角按资产数加权；单位均无资产（刚建档）时退化为简单平均，避免 0/0=NaN 注入 SVG */
+  const avgOf = function (key) {
+    if (!TENANTS.length) return 0;
+    const tot = TENANTS.reduce(function (s, x) { return s + (x.totalAssets || 0); }, 0);
+    if (!tot) return Math.round(TENANTS.reduce(function (s, x) { return s + (x[key] || 0); }, 0) / TENANTS.length * 10) / 10;
+    return Math.round(TENANTS.reduce(function (s, x) { return s + (x[key] || 0) * (x.totalAssets || 0); }, 0) / tot * 10) / 10;
+  };
+  const score = t ? (t.score || 0) : avgOf('score');
+  const closed = t ? (t.closed || 0) : avgOf('closed');
 
   const kpis = [
     { l:'外部资产总数', v: nf(totalAssets), d:'授权范围内已归一实体', t:'up', ic:'layers' },
@@ -1403,6 +1411,47 @@ function renderOverview() {
       + '<span class="note mono">' + x.next + '</span></div>'
       + '<div class="bar mt" style="height:5px"><i style="width:' + x.p + '%"></i></div></div>';
   }).join('');
+
+  /* 跨客户风险汇总：首页必须能一屏看到所有被监管单位的 EASM 风险面 */
+  const openOf = function (tid) { return LEDGER.filter(function (x) { return x.tenant === tid && x.st !== 'closed'; }).length; };
+  const notifyOf = function (tid) { return LEDGER.filter(function (x) { return x.tenant === tid && x.notify; }).length; };
+  const sheet = TENANTS.map(function (x) {
+    const ta = tenantAssets(x.id);
+    const c = ta.filter(function (a) { return a.risk === 'critical'; }).length;
+    const h = ta.filter(function (a) { return a.risk === 'high'; }).length;
+    const sw = SWEEP.filter(function (s) { return s.tenant === x.id; })[0];
+    const cov = sw ? Math.round(sw.cov.reduce(function (a, b) { return a + b; }, 0) / 5 * 100) : 0;
+    const st = sw ? sw.status : '待启动';
+    return '<tr class="' + (state.tenant === x.id ? 'sel' : '') + '" style="cursor:pointer" onclick="EASM.selectTenant(\'' + x.id + '\',\'overview\')">'
+      + '<td><div class="row" style="gap:9px"><i style="width:8px;height:8px;border-radius:50%;background:' + x.color + ';flex:none"></i>'
+      + '<div><b>' + esc(x.name) + '</b><div class="note mono">' + x.id + '</div></div></div></td>'
+      + '<td><div>' + esc(x.industry) + '</div><div class="note">' + esc(x.tier) + '</div></td>'
+      + '<td class="r mono">' + nf(x.totalAssets) + '</td>'
+      + '<td class="r mono crit">' + c + '</td>'
+      + '<td class="r mono high">' + h + '</td>'
+      + '<td class="r mono">' + openOf(x.id) + '</td>'
+      + '<td class="r mono">' + notifyOf(x.id) + '</td>'
+      + '<td><div class="row" style="gap:7px;min-width:118px"><div class="bar grow" style="height:5px"><i style="width:' + cov + '%"></i></div>'
+      + '<span class="note mono">' + cov + '%</span></div></td>'
+      + '<td><span class="tag ' + (st === '已闭环' ? 'ok' : st === '排查中' ? 'warn' : '') + '">' + st + '</span></td>'
+      + '<td class="r mono" style="font-weight:700;color:' + (x.score >= 70 ? 'var(--mint)' : x.score >= 62 ? 'var(--amber)' : 'var(--crit)') + '">' + x.score + '</td></tr>';
+  }).join('');
+  const sumAssets = TENANTS.reduce(function (s, x) { return s + x.totalAssets; }, 0);
+  const sumOpen = TENANTS.reduce(function (s, x) { return s + openOf(x.id); }, 0);
+  const sumNotify = TENANTS.reduce(function (s, x) { return s + notifyOf(x.id); }, 0);
+  if ($('#custRiskTbody')) {
+    $('#custRiskTbody').innerHTML = sheet
+      + '<tr class="total"><td><b>合计</b><div class="note">' + TENANTS.length + ' 家单位</div></td><td class="note">—</td>'
+      + '<td class="r mono"><b>' + nf(sumAssets) + '</b></td>'
+      + '<td class="r mono crit"><b>' + TENANTS.reduce(function (s, x) { return s + tenantAssets(x.id).filter(function (a) { return a.risk === 'critical'; }).length; }, 0) + '</b></td>'
+      + '<td class="r mono high"><b>' + TENANTS.reduce(function (s, x) { return s + tenantAssets(x.id).filter(function (a) { return a.risk === 'high'; }).length; }, 0) + '</b></td>'
+      + '<td class="r mono"><b>' + sumOpen + '</b></td><td class="r mono"><b>' + sumNotify + '</b></td>'
+      + '<td class="note" colspan="2">' + (state.tenant === 'all' ? '当前为全部单位视角' : '当前下钻：' + esc(curTenant() ? curTenant().name : '')) + '</td>'
+      + '<td class="r mono"><b>' + score + '</b></td></tr>';
+  }
+  if ($('#custRiskMeta')) {
+    $('#custRiskMeta').textContent = TENANTS.length + ' 家单位 · 待整改 ' + sumOpen + ' · 待通报 ' + sumNotify;
+  }
 
   $('#sideScore').textContent = score;
   $('#sideScoreBar').style.width = score + '%';
@@ -2190,7 +2239,7 @@ function buildReport() {
       + '<p style="font-size:11px;color:#64748b">统计口径：资产实体经归一化去重；暴露评分由可达性、漏洞密度、敏感度、陈旧度、配置强度五维加权得出；闭环率按 P1 ≤ 24h、P2 ≤ 7d 口径计算。</p>';
   }
 
-  h += '<div class="rp-foot"><span>Sentinel EASM · AI Native 外部攻击面管理系统</span>'
+  h += '<div class="rp-foot"><span>Lumina EASM · AI Native 外部攻击面管理系统</span>'
     + '<span>本报告由 Report Agent 自动编排生成，证据链可在平台内追溯</span></div>';
 
   return { html: h, tenant: t, period: state.rptPeriod, audience: AUDIENCE_LABEL[state.rptAudience], sections: Object.keys(S).filter(function (k) { return S[k]; }) };
@@ -2265,10 +2314,20 @@ function lvColor(l) { return l === '严重' ? 'var(--crit)' : l === '高' ? 'var
 /* ---------- 五阶段排查工作流 ---------- */
 state.phase = 'P1';
 function renderWorkflow() {
+  const scopeSel = $('#scopeTenant');
+  if (scopeSel) {
+    const want = state.scopeTenant || 'all';
+    scopeSel.innerHTML = '<option value="all">全部单位（逐单位校验授权）</option>'
+      + TENANTS.map(function (x) {
+        return '<option value="' + x.id + '">' + esc(x.name) + '（' + x.id + '）</option>';
+      }).join('');
+    scopeSel.value = (want === 'all' || TENANTS.some(function (x) { return x.id === want; })) ? want : 'all';
+    state.scopeTenant = scopeSel.value;
+  }
   const sw = SWEEP.filter(function (s) { return state.tenant === 'all' || s.tenant === state.tenant; });
   const totalFound = sw.reduce(function (a, b) { return a + b.found; }, 0);
   const totalOpen = sw.reduce(function (a, b) { return a + b.open; }, 0);
-  const avgCov = sw.reduce(function (a, b) { return a + b.cov.reduce(function (x, y) { return x + y; }, 0) / 5; }, 0) / sw.length;
+  const avgCov = sw.length ? sw.reduce(function (a, b) { return a + b.cov.reduce(function (x, y) { return x + y; }, 0) / 5; }, 0) / sw.length : 0;
 
   $('#sweepKpi').innerHTML = [
     { l:'排查阶段', v: PHASES.length + ' 个', d:'P1 搜索引擎 → P5 暗网兜底' },
@@ -2318,7 +2377,7 @@ function renderWorkflow() {
     + p.metrics.map(function (m) { return '<span class="tag">' + m + '</span>'; }).join('') + '</div></div></div>';
   h += '<div class="row wrap mt" style="gap:8px">'
     + '<button class="btn" onclick="EASM.runPhase(\'' + p.id + '\')">执行本阶段排查</button>'
-    + '<button class="btn ghost" onclick="EASM.toast(\'已把 ' + p.id + ' 的 ' + p.steps.length + ' 个步骤派发给对应责任人\')">派发步骤</button>'
+    + '<button class="btn ghost" onclick="EASM.go(\'ledger\')">查看风险台账</button>'
     + '<button class="btn ghost" onclick="EASM.go(\'syntax\')">查看本阶段语法</button></div>';
   $('#phaseDetail').innerHTML = h;
 
@@ -2954,8 +3013,10 @@ function renderTenantMenu() {
         + '<span class="tp-meta">' + x.score + '</span></button>';
     }).join('');
 }
-function selectTenant(id, view) {
+function selectTenant(id, view, silent) {
   state.tenant = id;
+  /* 静默刷新（数据水化后重建菜单）不得覆盖用户的排查范围选择，也不弹切换提示 */
+  if (!silent) state.scopeTenant = id;
   if (view) state.view = view;
   if (id !== 'all') { state.rptTenant = id; }
   renderTenantMenu();
@@ -2963,23 +3024,43 @@ function selectTenant(id, view) {
   render();
   if (state.view === 'overview') renderSweepPanel();
   if (state.view !== 'overview') go(state.view);
-  toast(id === 'all' ? '已切换到全部客户运营视图' : '已切换至 ' + tenantOf(id).name + ' 专属视图');
+  if (!silent) toast(id === 'all' ? '已切换到全部客户运营视图' : '已切换至 ' + tenantOf(id).name + ' 专属视图');
 }
 
 /* ---------- 路由 ---------- */
+const MODULES = [
+  { id:'home', label:'风险总览', views:['overview', 'customers'] },
+  { id:'monitor', label:'监控与预警', views:['monitor'] },
+  { id:'sweep', label:'排查', views:['workflow', 'mining', 'assets', 'ledger'] },
+  { id:'knowledge', label:'知识支撑', views:['syntax', 'classify', 'channels', 'vulnlib', 'intellib', 'toolchain', 'osslib'] },
+  { id:'ai', label:'AI 集成与调用', views:['agents', 'harness', 'integrations', 'api'] },
+  { id:'report', label:'报告中心', views:['report'] },
+  { id:'settings', label:'设置与日志', views:['settings', 'deploy'] }
+];
 const VIEW_TITLES = {
-  overview:'排查驾驶舱', customers:'客户总览', assets:'资产台账', mining:'攻击面挖掘',
-  vulnlib:'漏洞库', intellib:'情报库', report:'报告中心', agents:'AI Agent 中心',
+  overview:'EASM 风险总览', customers:'被监管单位', assets:'资产台账', mining:'攻击面挖掘',
+  vulnlib:'漏洞库', intellib:'情报库', report:'报告中心', agents:'智能编排',
   integrations:'集成与 MCP', api:'API 与数据出口',
-  workflow:'五阶段排查工作流', syntax:'检索语法库', classify:'敏感数据分类',
+  workflow:'排查工作台', syntax:'检索语法库', classify:'敏感数据分类',
   channels:'外部渠道巡查', ledger:'风险台账与整改',
-  harness:'DeepSeek Harness', toolchain:'开源工具链', osslib:'开源组件库', deploy:'部署与架构'
+  harness:'模型 Harness', toolchain:'开源工具链', osslib:'开源组件库',
+  settings:'设置与日志', deploy:'部署与架构'
 };
+const VIEW_MODULE = {};
+MODULES.forEach(function (m) { m.views.forEach(function (v) { VIEW_MODULE[v] = m.id; }); });
+function moduleOf(v) {
+  return MODULES.filter(function (m) { return m.id === VIEW_MODULE[v]; })[0];
+}
 function go(v) {
   state.view = v;
-  $$('.nav-item').forEach(function (n) { n.classList.toggle('on', n.dataset.view === v); });
+  const mod = VIEW_MODULE[v] || 'home';
+  const m = moduleOf(v);
+  $$('.nav-item').forEach(function (n) { n.classList.toggle('on', n.dataset.module === mod); });
+  $$('.ptab-group').forEach(function (g) { g.classList.toggle('on', g.dataset.module === mod); });
+  $$('.ptab').forEach(function (t) { t.classList.toggle('on', t.dataset.view === v); });
   $$('.view').forEach(function (s) { s.classList.toggle('on', s.id === 'view-' + v); });
   $('#crumbTitle').textContent = VIEW_TITLES[v] || v;
+  const pm = $('#pageModule'); if (pm) pm.textContent = m ? m.label : '';
   $('#side').classList.remove("open");
   $('#scrim').classList.remove('on');
   render();
@@ -3005,7 +3086,15 @@ function render() {
   else if (state.view === 'toolchain') renderToolchain();
   else if (state.view === 'osslib') renderOsslib();
   else if (state.view === 'deploy') renderDeploy();
+  else if (state.view === 'settings') renderSettings();
   if (state.view === 'overview') renderSweepPanel();
+}
+
+/* ---------- 设置与日志（健康/运行记录由 easm-live.js 实时水化） ---------- */
+function renderSettings() {
+  if ($('#settingsTenantCount')) $('#settingsTenantCount').textContent = TENANTS.length + ' 个';
+  if ($('#settingsAssetCount')) $('#settingsAssetCount').textContent = nf(ASSETS.length) + ' 项';
+  if ($('#settingsApiBase')) $('#settingsApiBase').textContent = location.origin;
 }
 
 /* ---------- 编排动画 ---------- */
@@ -3034,7 +3123,7 @@ function renderCopilot() {
     return '<button class="sug" onclick="EASM.cpAsk(this)">' + esc(s) + '</button>';
   }).join('');
   $('#cpBody').innerHTML = '<div class="cp-msg ai"><div class="cp-av">SY</div><div class="cp-tx">'
-    + '我是 Sentinel Copilot。我已接入本平台的资产、漏洞库、情报库与攻击路径图谱，可以回答跨客户的问题，也可以直接下达编排与报告指令。</div></div>';
+    + '我是 Lumina Copilot。我已接入本平台的资产、漏洞库、情报库与攻击路径图谱，可以回答跨客户的问题，也可以直接下达编排与报告指令。</div></div>';
 }
 function cpAsk(btn) { $('#cpInput').value = btn.textContent; cpSend(); }
 function cpSend() {
@@ -3059,8 +3148,119 @@ function cpSend() {
   $('#cpBody').scrollTop = $('#cpBody').scrollHeight;
 }
 
+/* ---------- 主题（默认浅色；选择持久化到 localStorage） ---------- */
+function applyTheme(light) {
+  document.body.classList.toggle('light', !!light);
+  localStorage.setItem('easm.theme', light ? 'light' : 'dark');
+  const b = $('#themeBtn');
+  if (b) b.innerHTML = light
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+}
+
+/* ---------- 排查范围（EASM 工作台）：阶段选择 + 授权范围读取 ---------- */
+function scopePhases() {
+  return $$('#scopePhases input[type=checkbox]').filter(function (c) { return c.checked; })
+    .map(function (c) { return c.value; });
+}
+function scopeChanged() {
+  const sel = $('#scopeTenant');
+  if (!sel) return;
+  state.scopeTenant = sel.value;
+  const badge = $('#scopeAuthBadge');
+  const info = $('#scopeAuthInfo');
+  if (state.scopeTenant === 'all') {
+    if (badge) { badge.textContent = '逐单位校验授权'; badge.className = 'sub'; }
+    if (info) info.textContent = '将逐个单位读取授权单并分别下发；任一单位无有效授权即拒绝执行，不跨单位借用授权。';
+    return;
+  }
+  if (badge) { badge.textContent = '授权读取中…'; badge.className = 'sub'; }
+  if (info) info.textContent = '正在读取该单位授权单（auth_scope）…';
+}
+function scopeAllPhases(on) {
+  $$('#scopePhases input[type=checkbox]').forEach(function (c) { c.checked = !!on; });
+}
+/* 未接入实时层时的回退：只提示能力边界，不模拟执行结果 */
+function startScopedSweep() {
+  const phases = scopePhases();
+  if (!phases.length) { toast('请至少选择一个排查阶段'); return; }
+  toast('未接入实时层：排查需后端按授权单执行（当前为示例模式，不伪造下发结果）', 1);
+}
+
+/* ---------- 客户端 CSV 导出（导出当前视图数据，不伪造服务端产物） ---------- */
+function csvCell(v) {
+  const s = String(v == null ? '' : v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function downloadCSV(filename, head, rows) {
+  const text = '\ufeff' + [head].concat(rows).map(function (r) { return r.map(csvCell).join(','); }).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
+  a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+}
+function stamp() {
+  const d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; };
+  return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes());
+}
+/* 导出必须标注数据口径：liveState 由 easm-live.js 注入，未接通/空库时导出的是内置示例 */
+function isDemoData(flag) {
+  const ls = (window.EASM && EASM.liveState) || {};
+  return !ls[flag || 'on'];
+}
+function demoPrefix(flag) { return isDemoData(flag) ? '示例-' : ''; }
+function demoNote(flag) { return isDemoData(flag) ? '（内置示例数据，非实时）' : '（当前视图实时数据）'; }
+function exportAssetsCSV() {
+  const list = ASSETS;
+  if (!list.length) { toast('当前没有资产可导出', 1); return; }
+  downloadCSV(demoPrefix('on') + 'EASM-资产快照-' + stamp() + '.csv',
+    ['资产ID', '数据域', '单位名称', '资产名称', '类型', '风险等级', '暴露评分', '责任人', 'IP', '端口', '状态', '首次发现'],
+    list.map(function (a) {
+      return [a.id, a.tenant, a.tenantName, a.name, a.typeLabel, a.risk, a.exp, a.owner, a.ip, a.port, a.status, a.firstSeen];
+    }));
+  toast('已导出资产快照：' + list.length + ' 项' + demoNote('on'));
+}
+function customerRiskRows() {
+  const openOf = function (tid) { return LEDGER.filter(function (x) { return x.tenant === tid && x.st !== 'closed'; }).length; };
+  const notifyOf = function (tid) { return LEDGER.filter(function (x) { return x.tenant === tid && x.notify; }).length; };
+  return TENANTS.map(function (x) {
+    const ta = tenantAssets(x.id);
+    const sw = SWEEP.filter(function (s) { return s.tenant === x.id; })[0];
+    const cov = sw ? Math.round(sw.cov.reduce(function (a, b) { return a + b; }, 0) / 5 * 100) : 0;
+    return {
+      t: x, assets: x.totalAssets,
+      crit: ta.filter(function (a) { return a.risk === 'critical'; }).length,
+      high: ta.filter(function (a) { return a.risk === 'high'; }).length,
+      open: openOf(x.id), notify: notifyOf(x.id),
+      cov: cov, st: sw ? sw.status : '待启动'
+    };
+  });
+}
+function exportCustomersCSV() {
+  if (!TENANTS.length) { toast('当前没有被监管单位可导出', 1); return; }
+  downloadCSV(demoPrefix('on') + 'EASM-单位风险汇总-' + stamp() + '.csv',
+    ['数据域', '被监管单位', '行业', '等级', '资产数', '严重', '高危', '待整改', '待通报', '五阶段覆盖(%)', '最近排查', '健康评分'],
+    customerRiskRows().map(function (r) {
+      return [r.t.id, r.t.name, r.t.industry, r.t.tier, r.assets, r.crit, r.high, r.open, r.notify, r.cov, r.st, r.t.score];
+    }));
+  toast('已导出单位风险汇总：' + TENANTS.length + ' 家' + demoNote('on'));
+}
+function exportSweepWorksheet() {
+  const sw = SWEEP.filter(function (s) { return state.tenant === 'all' || s.tenant === state.tenant; });
+  if (!sw.length) { toast('当前视角没有排查记录', 1); return; }
+  downloadCSV(demoPrefix('matrix') + 'EASM-排查工作底稿-' + stamp() + '.csv',
+    ['数据域', '单位', 'P1 搜索(%)', 'P2 测绘(%)', 'P3 端口目录(%)', 'P4 第三方(%)', 'P5 暗网(%)', '问题数', '待整改', '状态'],
+    sw.map(function (s) {
+      return [s.tenant, s.name].concat(s.cov.map(function (v) { return Math.round(v * 100); }))
+        .concat([s.found, s.open, s.status]);
+    }));
+  toast('已导出排查工作底稿：' + sw.length + ' 家' + demoNote('matrix'));
+}
+
 /* ---------- 初始化 ---------- */
 function init() {
+  applyTheme(localStorage.getItem('easm.theme') !== 'dark');
   $('#navTenantCount').textContent = TENANTS.length;
   $('#navVulnCount').textContent = VULN_LIB.length;
   $('#navIntelCount').textContent = INTEL_LIB.length;
@@ -3078,6 +3278,9 @@ function init() {
   $$('.nav-item').forEach(function (n) {
     n.addEventListener('click', function (e) { e.preventDefault(); go(n.dataset.view); });
   });
+  $$('.ptab').forEach(function (n) {
+    n.addEventListener('click', function (e) { e.preventDefault(); go(n.dataset.view); });
+  });
   $('#menuBtn').addEventListener('click', function () { $('#side').classList.toggle("open"); });
   $('#scrim').addEventListener('click', function () {
     $('#drawer').classList.remove('on'); $('#scrim').classList.remove('on'); $('#side').classList.remove("open");
@@ -3085,18 +3288,18 @@ function init() {
   $('#drawerClose').addEventListener('click', function () {
     $('#drawer').classList.remove('on'); $('#scrim').classList.remove('on');
   });
+  $('#settingsBtn').addEventListener('click', function () {
+    $('#drawer').classList.remove('on'); $('#copilot').classList.remove('on'); $('#scrim').classList.remove('on');
+    go('settings');
+  });
   $('#copilotOpen').addEventListener('click', function () { $('#copilot').classList.add('on'); $('#scrim').classList.add('on'); $('#cpInput').focus(); });
   $('#copilotClose').addEventListener('click', function () { $('#copilot').classList.remove('on'); $('#scrim').classList.remove('on'); });
   $('#cpSend').addEventListener('click', cpSend);
   $('#cpInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') cpSend(); });
   $('#themeBtn').addEventListener('click', function () {
-    document.body.classList.toggle('light');
-    const l = document.body.classList.contains('light');
-    $('#themeBtn').innerHTML = l
-      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></svg>'
-      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+    const l = !document.body.classList.contains('light');
+    applyTheme(l);
     toast(l ? '已切换为浅色主题' : '已切换为深色主题');
-    render();
   });
 
   /* 客户切换器 */
@@ -3141,6 +3344,9 @@ else init();
 
 window.EASM = {
   toast: toast, go: go, openDrawer: openDrawer, copilotOpen: function () { $('#copilot').classList.add('on'); $('#scrim').classList.add('on'); },
+  scopeChanged: scopeChanged, scopeAllPhases: scopeAllPhases, startScopedSweep: startScopedSweep,
+  exportAssetsCSV: exportAssetsCSV, exportCustomersCSV: exportCustomersCSV, exportSweepWorksheet: exportSweepWorksheet,
+  reloadLiveData: function () { location.reload(); },
   selectTenant: selectTenant, setAssetFilter: function (k) { state.assetFilter = k; renderAssets(); },
   setVulnFilter: function (k) { state.vulnFilter = k; renderVuln(); },
   setIntelFilter: function (k) { state.intelFilter = k; renderIntel(); },

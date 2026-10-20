@@ -1,0 +1,280 @@
+// Lumina 烛隐 EASM · 当前态模块/域依赖图（基线 v0.0.2）
+// 说明：实线 = Go 编译期 import；虚线 = 可选/未装配 Provider；灰底 = 可选外部能力。
+// 为避免 48 个 internal 包的“毛球图”，仅保留主干依赖；完整 import 矩阵可用
+// go list -f '{{.ImportPath}}|{{join .Imports ","}}' ./platform/services/internal/... 复算。
+// 渲染：dot -Tsvg module-map.dot -o module-map.svg（本机未安装 Graphviz，见 README）。
+
+digraph lumina_modules {
+    graph [
+        rankdir=TB,
+        compound=true,
+        splines=true,
+        nodesep=0.28,
+        ranksep=0.55,
+        fontname="PingFang SC",
+        fontsize=11,
+        labelloc="t",
+        label="Lumina 烛隐 EASM · 当前态模块/域依赖（主干，非全量 import）",
+        bgcolor="#ffffff"
+    ];
+    node [
+        shape=box,
+        style="rounded,filled",
+        fillcolor="#e8f0fa",
+        color="#4a78a8",
+        fontname="PingFang SC",
+        fontsize=10,
+        margin="0.10,0.06"
+    ];
+    edge [
+        color="#5b6b7c",
+        fontname="PingFang SC",
+        fontsize=8,
+        arrowsize=0.6
+    ];
+
+    subgraph cluster_entry {
+        label="进程入口（cmd）";
+        style="rounded,filled";
+        fillcolor="#f2f2f2";
+        color="#9a9a9a";
+        server [label="cmd/server\nREST + MCP + console"];
+        jobworker [label="cmd/jobworker\nPG 队列消费"];
+        worker [label="cmd/worker\nTemporal Worker"];
+        migrate [label="cmd/migrate\n迁移/一次性", style="rounded,dashed,filled"];
+    }
+
+    subgraph cluster_edge {
+        label="接入与组装";
+        style="rounded,filled";
+        fillcolor="#eef6ee";
+        color="#7aa87a";
+        app [label="internal/app\n装配根 Deps"];
+        httpapi [label="internal/httpapi\nREST 路由\n118 条注册"];
+        mcp [label="internal/mcp\nJSON-RPC\n三级工具"];
+    }
+
+    subgraph cluster_platform {
+        label="平台基座";
+        style="rounded,filled";
+        fillcolor="#f7f0e6";
+        color="#b08a5a";
+        config [label="config\n集中装载/校验"];
+        auth [label="authn / authz / confirm\n认证 / 授权 / 高危确认"];
+        rbac_audit [label="rbac / audit\n权限矩阵 / 仅追加审计"];
+        tenant [label="tenant\n实体数据域(legacy tenant)"];
+    }
+
+    subgraph cluster_discovery_a {
+        label="采集与编排";
+        style="rounded,filled";
+        fillcolor="#eaf4f6";
+        color="#5a9aa8";
+        sweep [label="sweep\n五阶段 P1–P5"];
+        collect [label="collect\nscan:repo/port/dir"];
+        darkweb [label="darkweb\n暗网兜底/线索包"];
+        candidate [label="candidate\n候选归一"];
+        plugin [label="plugin\n插件契约/许可证护栏"];
+        connector [label="connector\nseed/ct/dns/asm/cloud"];
+        discovery [label="discovery\nObservation→资产/图"];
+        job [label="job\nPG 队列/租约"];
+        tdispatcher [label="tdispatcher\nTemporal 调度"];
+    }
+
+    subgraph cluster_discovery_b {
+        label="资产、图谱与发现闭环";
+        style="rounded,filled";
+        fillcolor="#eaf4f6";
+        color="#5a9aa8";
+        inventory [label="inventory\n资产身份+观察流"];
+        ingest [label="ingest\n资产→图投影"];
+        graph [label="graph\n13 实体 / 11 关系"];
+        detect [label="detect\n22 规则判敏"];
+        finding [label="finding\n10 态生命周期"];
+        alert [label="alert\n告警 open/ack/closed"];
+    }
+
+    subgraph cluster_governance {
+        label="治理与交付闭环";
+        style="rounded,filled";
+        fillcolor="#f8ecec";
+        color="#b07a7a";
+        ledger [label="ledger\n四态 + 三重门"];
+        projection [label="projection\nFinding→台账"];
+        workorder [label="workorder\n五态工单"];
+        notice [label="notice\n通报/回执/交付包"];
+        report [label="report\nMD/JSON/PDF"];
+        evidence [label="evidence\nWORM Store"];
+        verifier [label="verifier\n门3 复测"];
+        monitor [label="monitor\n监控/任务单"];
+        notify [label="notify\nWebhook/SMTP/SOAR"];
+        evalset [label="evalset\n评测/放量门禁"];
+    }
+
+    subgraph cluster_knowledge {
+        label="知识与 AI（辅助，不裁决）";
+        style="rounded,filled";
+        fillcolor="#f3ecf8";
+        color="#9a7ab0";
+        asset [label="asset\n资产清单"];
+        intel_vuln_own [label="intel / vuln / ownership\n漏洞/情报/归属"];
+        classify_scoring [label="classify / scoring\n22 规则 / 四因子"];
+        secret [label="secret\n凭据有效性三档"];
+        shadowit [label="shadowit\n影子 IT 建议"];
+        ai [label="ai\nProvider 端口"];
+        mm [label="mm\n多模态判敏"];
+        usage [label="usage\nToken 计量/预算"];
+    }
+
+    subgraph cluster_storage {
+        label="持久化适配";
+        style="rounded,filled";
+        fillcolor="#f0f0f0";
+        color="#8a8a8a";
+        pgstore [label="pgstore\n各域 Store 的 PG 实现\nRLS GUC / SKIP LOCKED"];
+        memstores [label="内存 Store\nNewMemStore()\n单测/演示模式", style="rounded,filled"];
+    }
+
+    subgraph cluster_ext {
+        label="外部依赖 / Provider（虚线=可选或未装配）";
+        style="rounded,filled";
+        fillcolor="#fafafa";
+        color="#bdbdbd";
+        pg [label="PostgreSQL\n唯一必需外部依赖", shape=cylinder, fillcolor="#ededed"];
+        minio [label="MinIO / S3\n证据后端（可选）", shape=cylinder, style="rounded,dashed,filled", fillcolor="#f5f5f5"];
+        temporal [label="Temporal\n工作流（可选）", style="rounded,dashed,filled", fillcolor="#f5f5f5"];
+        idp [label="OIDC IdP\n（可选）", style="rounded,dashed,filled", fillcolor="#f5f5f5"];
+        llm [label="LLM Provider\n（可选）", style="rounded,dashed,filled", fillcolor="#f5f5f5"];
+        sandbox [label="Sandbox Verifier\nEASM_SANDBOX_URL（可选）", style="rounded,dashed,filled", fillcolor="#f5f5f5"];
+        cli [label="gitleaks / nmap / ffuf\nCLI 子进程", style="rounded,filled", fillcolor="#f5f5f5"];
+        feeds [label="crt.sh / DNS / ASM / Cloud\n暗网 feed（夹具）", style="rounded,filled", fillcolor="#f5f5f5"];
+        neo4j [label="graph.Neo4jHTTP\nProvider 存在但未装配", style="rounded,dashed,filled", fillcolor="#f5f5f5"];
+        vectorstore [label="向量库\n未配置（MCP 如实标注）", style="rounded,dashed,filled", fillcolor="#f5f5f5"];
+    }
+
+    // 入口与组装
+    server -> app;
+    server -> config;
+    server -> pgstore;
+    server -> evidence;
+    server -> verifier;
+    server -> tdispatcher;
+    jobworker -> job;
+    jobworker -> discovery;
+    jobworker -> inventory;
+    jobworker -> pgstore;
+    worker -> sweep;
+    worker -> pgstore;
+    migrate -> pg [style=dashed, label="DDL", color="#999999"];
+
+    app -> httpapi;
+    app -> mcp;
+    app -> sweep;
+    app -> ledger;
+    app -> inventory;
+    app -> finding;
+    app -> evidence;
+    app -> ai;
+
+    httpapi -> sweep;
+    httpapi -> ledger;
+    httpapi -> workorder;
+    httpapi -> notice;
+    httpapi -> report;
+    httpapi -> inventory;
+    httpapi -> finding;
+    httpapi -> graph;
+    httpapi -> plugin;
+    httpapi -> tenant;
+    mcp -> sweep;
+    mcp -> ledger;
+    mcp -> notice;
+    mcp -> report;
+    mcp -> workorder;
+    mcp -> graph;
+    mcp -> tenant;
+
+    // 采集与编排
+    sweep -> ledger;
+    sweep -> auth;
+    sweep -> classify_scoring;
+    sweep -> asset;
+    collect -> candidate;
+    collect -> ledger;
+    collect -> evidence;
+    collect -> auth;
+    darkweb -> candidate;
+    darkweb -> ledger;
+    darkweb -> evidence;
+    darkweb -> intel_vuln_own;
+    connector -> feeds [label="HTTP/feed"];
+    discovery -> connector;
+    discovery -> inventory;
+    discovery -> graph;
+    discovery -> detect;
+    discovery -> finding;
+    discovery -> job;
+    tdispatcher -> sweep;
+    tdispatcher -> temporal [style=dashed, label="可选"];
+
+    // 资产、检测与告警
+    ingest -> asset;
+    ingest -> graph;
+    inventory -> graph;
+    inventory -> rbac_audit;
+    detect -> finding;
+    detect -> alert;
+    detect -> inventory;
+    detect -> classify_scoring;
+    finding -> rbac_audit;
+    job -> rbac_audit;
+    alert -> monitor;
+
+    // 治理闭环
+    ledger -> rbac_audit;
+    projection -> finding;
+    projection -> ledger;
+    workorder -> ledger;
+    workorder -> rbac_audit;
+    notice -> ledger;
+    notice -> evidence;
+    notice -> rbac_audit;
+    report -> ledger;
+    report -> notice;
+    report -> evidence;
+    verifier -> ledger;
+    verifier -> evidence;
+    verifier -> sandbox [style=dashed, label="EASM_SANDBOX_URL"];
+    evalset -> ledger;
+    evalset -> classify_scoring;
+    monitor -> asset;
+    monitor -> intel_vuln_own;
+    notify -> monitor;
+
+    // 知识与 AI
+    secret -> graph;
+    shadowit -> ai;
+    shadowit -> intel_vuln_own;
+    shadowit -> usage;
+    mm -> ai;
+    mm -> graph;
+    mm -> usage;
+    ai -> llm [style=dashed, label="三件套同设才装配"];
+    graph -> neo4j [style=dashed, label="未装配"];
+    mcp -> vectorstore [style=dashed, label="未配置"];
+    auth -> idp [style=dashed, label="可选"];
+
+    // 持久化
+    pgstore -> pg;
+    pgstore -> ledger [label="实现 Store"];
+    pgstore -> inventory;
+    pgstore -> job;
+    pgstore -> finding;
+    pgstore -> notice;
+    pgstore -> report;
+    evidence -> minio [style=dashed, label="可选"];
+    memstores -> ledger [style=dashed, label="单测/演示"];
+
+    // 图例
+    legend [shape=note, style="filled", fillcolor="#fffff0", color="#c0c0a0", label="图例\n实线：编译期 import（主干裁剪）\n虚线：可选 / 未装配 Provider\n灰底：外部依赖\n注：pgstore 实现各域 Store；完整依赖用 go list 复算", fontsize=9];
+}

@@ -23,7 +23,7 @@
     <text x="0" y="148" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif" font-size="42" font-weight="600" fill="url(#cyGrad)">烛隐 EASM</text>
     <text x="0" y="210" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif" font-size="23" fill="#C7CFDF">五阶段互联网敏感信息过度泄露排查平台：</text>
     <text x="0" y="242" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif" font-size="23" fill="#C7CFDF">证据先行 · 零误报闭环 · 授权一票否决</text>
-    <text x="0" y="296" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="18" fill="#8B94AB">Go 1.24 · net/http 零框架 · console 零依赖纯静态 · v0.0.1</text>
+    <text x="0" y="296" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="18" fill="#8B94AB">Go 1.24 · net/http 零框架 · console 零依赖纯静态 · v0.0.2</text>
     <text x="0" y="322" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="18" fill="#8B94AB">双后端：内存 MemStore ↔ PostgreSQL（RLS 行级租户隔离）</text>
   </g>
 

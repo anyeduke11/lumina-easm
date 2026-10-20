@@ -35,8 +35,11 @@ d=json.load(open('/tmp/ledger-%s.json' % os.environ['T']))
 mine=[i for i in d['items'] if i.get('tenant')==os.environ['T']]
 print((mine[0].get('note') or '')[:64])")"
 
-echo "== ② 发起线索通报（属地公安机关 24h）=="
-NID=$(curl -s -X POST $B/v1/tenants/$T/notices -H "$A" -H "$J" \
+echo "== ② 发起线索通报（属地公安机关 24h；EASM_REQUIRE_CONFIRMATION 默认开启）=="
+CID=$(curl -s -X POST $B/v1/confirmations -H "$A" -H "$J" \
+  -d "{\"entity_id\":\"$T\",\"action\":\"notice.create\",\"resource\":\"$LID\",\"method\":\"password\",\"reason\":\"证据链 live 示证\"}" \
+  | python3 -c "import json,sys;print(json.load(sys.stdin)['id'])")
+NID=$(curl -s -X POST $B/v1/tenants/$T/notices -H "$A" -H "$J" -H "X-EASM-Confirmation: $CID" \
   -d "{\"ledger_id\":\"$LID\",\"target\":\"属地公安机关\"}" \
   | python3 -c "import json,sys;print(json.load(sys.stdin)['id'])")
 echo "  通报单号: $NID"

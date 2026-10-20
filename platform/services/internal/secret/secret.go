@@ -21,7 +21,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -464,10 +467,24 @@ func fmtFloat(f float64) string {
 
 // ---- 外呼 provider（默认不装配；装配=显式 env 开启）----
 
+// ErrProbeTarget 探针目标越界（SSRF 防护）：仅允许 http(s) 公网地址，
+// 内网/本机/链路本地/组播/保留段一律拒绝（默认私网也不放行）。
+var ErrProbeTarget = errors.New("secret: 探针目标不被允许（仅允许 http(s) 公网地址）")
+
+// blockedPrefixes net.IP 判定未覆盖的特殊用途段（解析结果与直连目标均校验）。
+var blockedPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"), // CGNAT
+	netip.MustParsePrefix("192.0.0.0/24"),  // IETF 协议分配
+	netip.MustParsePrefix("198.18.0.0/15"), // 基准测试
+	netip.MustParsePrefix("240.0.0.0/4"),   // 保留段（含广播地址）
+}
+
 // HTTPProber 非破坏外呼 provider：仅 GET（NFR-SEC-010 非破坏性），带超时与可选步间等待。
 type HTTPProber struct {
-	client *http.Client
-	pacer  Pacer
+	client       *http.Client
+	pacer        Pacer
+	allowPrivate bool
 }
 
 // Pacer 步间等待端口（消费授权 rate_limit；nil=不限速）。
@@ -476,20 +493,137 @@ type Pacer interface {
 }
 
 // NewHTTPProber 构造外呼 provider（timeout 为单次请求上限）。
+// 默认拒绝内网目标：地址校验在拨号前对 DNS 解析结果执行（防 DNS rebinding），
+// 并直连已验证 IP；不走环境代理、不跟随重定向。
 func NewHTTPProber(timeout time.Duration, pacer Pacer) *HTTPProber {
 	if timeout <= 0 {
 		timeout = 8 * time.Second
 	}
-	return &HTTPProber{client: &http.Client{Timeout: timeout, CheckRedirect: noRedirect}, pacer: pacer}
+	p := &HTTPProber{pacer: pacer}
+	p.client = &http.Client{
+		Timeout:       timeout,
+		CheckRedirect: noRedirect,
+		Transport: &http.Transport{
+			Proxy:                 nil,
+			DialContext:           p.dialContext,
+			TLSHandshakeTimeout:   5 * time.Second,
+			ResponseHeaderTimeout: timeout,
+			DisableKeepAlives:     true,
+		},
+	}
+	return p
+}
+
+// WithPrivateTargets 显式放开私网目标（默认拒绝；按部署边界谨慎开启，如内网自建验证端点）。
+func (p *HTTPProber) WithPrivateTargets(allow bool) *HTTPProber {
+	p.allowPrivate = allow
+	return p
 }
 
 func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
+// dialContext 拨号前校验解析出的全部地址：任一条落在受限段即整体拒绝（不赌哪条先连）。
+func (p *HTTPProber) dialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || host == "" {
+		return nil, fmt.Errorf("%w: 地址 %q 非法", ErrProbeTarget, addr)
+	}
+	ips, err := resolveIPs(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("%w: 解析 %q 失败: %v", ErrProbeTarget, host, err)
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("%w: %q 无解析结果", ErrProbeTarget, host)
+	}
+	if !p.allowPrivate {
+		for _, ip := range ips {
+			if blockedIP(ip) {
+				return nil, fmt.Errorf("%w: %q 解析到受限地址 %s", ErrProbeTarget, host, ip)
+			}
+		}
+	}
+	d := &net.Dialer{Timeout: 5 * time.Second}
+	var lastErr error
+	for _, ip := range ips {
+		conn, err := d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+func resolveIPs(ctx context.Context, host string) ([]net.IP, error) {
+	if ip := net.ParseIP(host); ip != nil {
+		return []net.IP{ip}, nil
+	}
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]net.IP, 0, len(addrs))
+	for _, a := range addrs {
+		out = append(out, a.IP)
+	}
+	return out, nil
+}
+
+// blockedIP 受限地址判定：环回/私网/链路本地/组播/未指定 + 特殊用途段。
+func blockedIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		ip = ip4
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsMulticast() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return true
+	}
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return true
+	}
+	addr = addr.Unmap()
+	for _, p := range blockedPrefixes {
+		if p.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+// validateProbeURL 请求发出前的静态校验（字面 IP/方案立即拒，不动网络）。
+func validateProbeURL(raw string, allowPrivate bool) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("%w: URL 非法", ErrProbeTarget)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("%w: 仅允许 http(s)，收到 %q", ErrProbeTarget, u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("%w: 缺少主机名", ErrProbeTarget)
+	}
+	if allowPrivate {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip != nil && blockedIP(ip) {
+		return fmt.Errorf("%w: 目标是受限地址 %s", ErrProbeTarget, ip)
+	}
+	return nil
+}
 
 // Probe 对请求方显式给出的目标发起 GET（不跟随重定向，避免被带到非预期端点）。
 func (p *HTTPProber) Probe(ctx context.Context, e Entry) (ProbeResult, error) {
 	target := strings.TrimSpace(e.ProbeURL)
 	if target == "" {
 		return ProbeResult{}, errors.New("未提供验证目标")
+	}
+	if err := validateProbeURL(target, p.allowPrivate); err != nil {
+		return ProbeResult{}, err
 	}
 	if p.pacer != nil {
 		if err := p.pacer.Wait(ctx); err != nil {

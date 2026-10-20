@@ -1,0 +1,166 @@
+// Lumina 烛隐 EASM · 关键业务闭环（当前态，基线 v0.0.2）
+// 该图回答一个问题：一条外部暴露/泄露线索如何从“授权”走到“可验证闭环”。
+// 实线 = 代码中的主数据/控制流；虚线 = 可选 Provider 或旁路辅助（不裁决）。
+// 渲染：dot -Tsvg flow-closed-loop.dot -o flow-closed-loop.svg（本机未安装 Graphviz）。
+
+digraph lumina_closed_loop {
+    graph [
+        rankdir=TB,
+        compound=true,
+        splines=true,
+        nodesep=0.30,
+        ranksep=0.50,
+        fontname="PingFang SC",
+        fontsize=11,
+        labelloc="t",
+        label="Lumina 烛隐 EASM · 关键业务闭环：授权 → 采集 → 三重门 → 处置 → 复测",
+        bgcolor="#ffffff"
+    ];
+    node [
+        shape=box,
+        style="rounded,filled",
+        fillcolor="#eaf2fb",
+        color="#4a78a8",
+        fontname="PingFang SC",
+        fontsize=10,
+        margin="0.10,0.06"
+    ];
+    edge [
+        color="#5b6b7c",
+        fontname="PingFang SC",
+        fontsize=8,
+        arrowsize=0.6
+    ];
+
+    subgraph cluster_authorize {
+        label="① 授权与采集（一票否决⑥）";
+        style="rounded,filled";
+        fillcolor="#fff4e6";
+        color="#c09060";
+        authz_scope [label="授权单 Scope\n有效期 / 域名 / CIDR / 端口\n时间窗 / 限速 / 二次授权", shape=note, fillcolor="#fff9e6"];
+        sweep_entry [label="sweep\nP1–P5 五阶段"];
+        collect_entry [label="collect\nscan:repo / port / dir"];
+        darkweb_entry [label="darkweb\n暗网兜底"];
+        connector_entry [label="connector / discovery\nseed / ct / dns / asm / cloud"];
+        cli_tools [label="gitleaks / nmap / ffuf\nCLI 子进程"];
+        feeds [label="crt.sh / DNS / ASM / Cloud\n暗网 feed（当前夹具）", style="rounded,filled", fillcolor="#f7f7f7"];
+    }
+
+    subgraph cluster_discover {
+        label="② 候选归一、资产身份与图谱";
+        style="rounded,filled";
+        fillcolor="#eaf4f6";
+        color="#5a9aa8";
+        candidate [label="candidate\neasm.candidate.v1\nasset / finding / lead"];
+        inventory [label="inventory\n规范资产 + 别名\nappend-only 观察流"];
+        graph [label="暴露图\n13 类实体 / 11 类关系"];
+        detect [label="detect\n22 条判敏规则"];
+    }
+
+    subgraph cluster_gates {
+        label="③ 零误报三重门（通用入账路径，旁路无门）";
+        style="rounded,filled";
+        fillcolor="#fdf0f0";
+        color="#b07070";
+        gate1 [label="门1（V-5）\n严重级须 ≥2 独立信源\n不足→降“高”+ 审计", shape=diamond, fillcolor="#ffecec"];
+        gate2 [label="门2（V-10）\n严重级须已回答反证\n未答→高；反证成立→中", shape=diamond, fillcolor="#ffecec"];
+        ledger [label="台账 Item\nopen / doing / closed / notify\nL-… 编号"];
+        evidence [label="证据 WORM\nraw_ref / snapshot_ref\n不可变对象", shape=cylinder, fillcolor="#f3f3f3"];
+    }
+
+    subgraph cluster_finding {
+        label="④ 发现与治理闭环";
+        style="rounded,filled";
+        fillcolor="#eef6ee";
+        color="#7aa87a";
+        finding [label="Finding 生命周期\nnew → triaged → validating\n→ confirmed / verified → closed\n(false_positive / risk_accepted / duplicate)"];
+        projection [label="projection\nconfirmed/verified\n投影为台账 P4"];
+        alert [label="alert\n高危自动 raise"];
+        workorder [label="工单五态\n待整改→处置中→已通报平台\n→已下架→已处置"];
+        notice [label="通报\n公安 24h / 通报中心 48h\n回执锁定 + 交付包"];
+        report [label="报告\nMD / JSON / PDF"];
+    }
+
+    subgraph cluster_verify {
+        label="⑤ 复测闭环（门3）";
+        style="rounded,filled";
+        fillcolor="#f3ecf8";
+        color="#9a7ab0";
+        verify [label="POST /v1/ledger/{id}/verify\nreproduced→closed\nrefuted/inconclusive→doing", shape=diamond, fillcolor="#f6eefb"];
+        evalset [label="evalset\n评测集 / 放量门禁\n误报样本回流"];
+    }
+
+    subgraph cluster_aux {
+        label="旁路：审计与 AI（不裁决）";
+        style="rounded,filled";
+        fillcolor="#f7f7f7";
+        color="#a0a0a0";
+        audit [label="audit\nallow / deny 仅追加", shape=note, fillcolor="#fffef0"];
+        ai [label="AI Provider\n研判/文案/多模态\n结论不入台账", style="rounded,dashed,filled", fillcolor="#f5f5f5"];
+        sandbox [label="Sandbox Verifier\nEASM_SANDBOX_URL（可选）", style="rounded,dashed,filled", fillcolor="#f5f5f5"];
+    }
+
+    operator [label="安全运营人员\n线下执行 / 回填", style="rounded,filled", fillcolor="#fff2d9", color="#b08040"];
+    third_party [label="第三方平台\n仓库 / 网盘 / 社交 / 暗市", style="rounded,filled", fillcolor="#f0f0f0"];
+    regulator [label="公安 / 通报中心\n人工投递 + 回执", style="rounded,filled", fillcolor="#f0f0f0"];
+
+    // ① 授权 → 采集
+    authz_scope -> sweep_entry [label="执行前读 Scope\n有效期/范围/时间窗"];
+    authz_scope -> collect_entry [label="Validate + CheckTarget\n限速/二次授权"];
+    collect_entry -> cli_tools [label="exec.CommandContext"];
+    cli_tools -> candidate [label="解析/归一\n失败入 unsupported"];
+    collect_entry -> candidate [label="原始输出"];
+    darkweb_entry -> candidate [label="线索包"];
+    connector_entry -> feeds [label="拉取"];
+    feeds -> inventory [label="Observation"];
+    connector_entry -> inventory [label="Ingest"];
+
+    // ② 资产与检测
+    inventory -> graph [label="UpsertEntity / Relation"];
+    inventory -> detect [label="观察值判敏"];
+    detect -> finding [label="命中→Finding"];
+    detect -> alert [label="high / critical"];
+
+    // ③ 三重门
+    sweep_entry -> gate1 [label="命中写台账"];
+    candidate -> gate1 [label="入账"];
+    projection -> gate1 [label="投影入账\n严重级仍过门1/门2"];
+    gate1 -> gate2 [label="通过/降级"];
+    gate2 -> ledger [label="入账 + 留痕"];
+    darkweb_entry -> evidence [label="线索包固化"];
+    collect_entry -> evidence [label="raw / snapshot"];
+    ledger -> evidence [label="ref 可回溯"];
+
+    // ④ 治理闭环
+    finding -> projection [label="confirmed/verified"];
+    ledger -> workorder [label="同租户真实条目"];
+    ledger -> notice [label="同租户真实条目"];
+    ledger -> report [label="数据源"];
+    workorder -> operator [label="生成工单"];
+    operator -> third_party [label="投诉 / 删除申请"];
+    third_party -> operator [label="下架 / 拒绝"];
+    operator -> workorder [label="状态回填\n跟催回退"];
+    notice -> operator [label="通报材料"];
+    report -> operator [label="报送材料"];
+    operator -> regulator [label="人工投递 / 报送"];
+    regulator -> operator [label="回执"];
+    operator -> notice [label="回填回执\n首份凭证锁定"];
+
+    // ⑤ 复测与回流
+    ledger -> verify [label="门3 前置"];
+    verify -> evidence [label="reproduced 必带\nevidence_ref"];
+    verify -> ledger [label="状态转移\nreproduced→closed\nrefuted→doing"];
+    verify -> sandbox [style=dashed, label="可选 Provider\n未装配=501"];
+    ledger -> evalset [label="复测信号回流"];
+    evalset -> projection [style=dashed, label="评测结论不直接改台账"];
+
+    // 旁路
+    sweep_entry -> audit [style=dashed, label="allow/deny"];
+    ledger -> audit [style=dashed, label="gate 降级/操作"];
+    notice -> audit [style=dashed];
+    verify -> audit [style=dashed];
+    ai -> finding [style=dashed, label="辅助研判\n不写结论"];
+    ai -> report [style=dashed, label="文案层"];
+
+    legend [shape=note, style="filled", fillcolor="#fffff0", color="#c0c0a0", label="读图要点\n1) 所有入账路径共用门1/门2；门3 只发生在 verify。\n2) 没有 evidence_ref 的“已修复”无法闭环（C-5 / AX-3）。\n3) 工单/通报/报告以同租户真实台账条目为前置，不能凭空生成。\n4) darkweb 当前为夹具；真实 feed 属外部项（G8-03）。\n5) 工单提交与通报报送由人工完成；平台生成材料并接收状态/回执回填。\n6) AI 为旁路，不生产事实、不裁决。", fontsize=9];
+}

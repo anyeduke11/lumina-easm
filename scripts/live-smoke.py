@@ -7,7 +7,8 @@
 ③ V-1 新增：M2 租户级端点双向守卫——路由存在（非 404）**且** easm-live.js 有引用
    （旧正则只捕字面量 api('/v1/...')，租户级端点走 tBase(tid)+'...' 动态拼接不覆盖，
     路由删改时旧守卫仍全绿=回归防线缺口，审查报告 P1-1）；
-④ 两份 JS 语法合法（node --check）。
+④ 两份 JS 语法合法（node --check）；
+⑤ 前端错误归因回归守卫（toast 词法作用域/网络错误标记/空库短路，见文末）。
 前提：server @18080 运行（含 console 静态面）。用法：python3 scripts/live-smoke.py
 """
 import json
@@ -41,9 +42,25 @@ if (
 ):
     fail.append("index.html 挂载点缺失（view-monitor/monitorFeed/navAlertCount + S-3 导航徽标 " + "/".join(S3_NAV_PILLS) + "）")
 
+# 七模块操作流：模块导航 + 上下文页签 + 排查范围卡片 + 设置与日志页
+# （2026-10-20 重构：数据源接入已从浮动/抽屉迁入「设置与日志」页，旧 settingsDrawer 移除）
+for mod in ("home", "monitor", "sweep", "knowledge", "ai", "report", "settings"):
+    if f'data-module="{mod}"' not in html:
+        fail.append(f"index.html 缺模块导航: {mod}")
+for mount in ("pageTabs", "pageModule", "scopeTenant", "scopePhases", "scopeAuthInfo", "scopeStart",
+              "settingsBtn", "view-settings", "settingsHealth", "settingsReady",
+              "settingsSweepTbody", "settingsAlertTbody", "lv-state", "lv-token", "lv-reload"):
+    if mount not in html:
+        fail.append(f"index.html 缺七模块外壳/设置页挂载点: {mount}")
+if "settingsDrawer" in html:
+    fail.append("index.html 仍含旧 settingsDrawer（设置已迁入独立视图，禁止回退浮动抽屉）")
+
 st, livejs = get("/easm-live.js")
 if st != 200:
     fail.append("easm-live.js 不可达")
+st, appjs = get("/app.js")
+if st != 200:
+    fail.append("app.js 不可达")
 paths = sorted(set(re.findall(r"api\('(/v1/[^']+)'", livejs)))
 for p in paths:
     if p.endswith("/"):
@@ -169,6 +186,15 @@ TENANT_SCOPED = [
     ("评测运行", "/v1/tenants/{tid}/evalset:run", "", None, False),
     ("评测运行历史", "/v1/tenants/{tid}/evalset/runs", "", None, False),
     ("放量门禁检查", "/v1/tenants/{tid}/evalset/gate", "", None, False),
+    ("灰度放量动作面", "/v1/tenants/{tid}/evalset/promote", "", None, False),
+    # M3-D 多模态判敏（ENH-03；未装配=501，路由存在性仍受守卫覆盖）
+    ("多模态判敏", "/v1/tenants/{tid}/mm:analyze", "", None, False),
+    # M4-03 排查任务单（FR-MON-003：触发→任务单→人工闭环）
+    ("排查任务单列表", "/v1/tenants/{tid}/monitors/tasks", "", None, False),
+    ("POC 触发排查", "/v1/tenants/{tid}/monitors/tasks:poc", "", None, False),
+    # M4-07 计量与预算（FR-HRN-10：AI 面按租户 token 计量；预算口径变更人在环）
+    ("AI 用量汇总", "/v1/tenants/{tid}/usage/summary", "", None, False),
+    ("AI 预算设置", "/v1/tenants/{tid}/usage/budget", "", None, False),
 ]
 api_only = 0
 for name, tmpl, marker, res_id, wired in TENANT_SCOPED:
@@ -192,6 +218,73 @@ print(f"租户级端点守卫: {len(TENANT_SCOPED)} 项（前端接线 {len(TENA
 for f in ("console/app.js", "console/easm-live.js"):
     if subprocess.run(["node", "--check", f], capture_output=True).returncode != 0:
         fail.append(f"语法错误: {f}")
+
+# ---- 前端回归守卫（2026-10-20 livebar 误报「后端不可达」+ 数据源接入迁入设置与日志页）----
+# ① app.js 是 IIFE，其 toast 只经 EASM.toast 出口；<div id="toast"> 会让 window.toast
+#    指向 DOM 元素，裸调用=TypeError。easm-live.js 必须自带本地包装。
+if "function toast(" not in livejs:
+    fail.append("easm-live.js 缺本地 toast 包装（须委托 EASM.toast；window.toast 是 DOM 元素）")
+if re.search(r"window\.toast\s*[)(]", livejs):
+    fail.append("easm-live.js 直接使用 window.toast（<div id=toast> 的 DOM 元素，非函数）")
+# ② 网络层失败须单独标记，错误归因不得一律写成「后端不可达」
+if "err.network" not in livejs:
+    fail.append("easm-live.js 未标记网络层错误（err.network）——错误归因失真")
+# ③ 空租户分支必须短路，否则成功分支会把内置示例数据标成「实时」
+if "if (empty) return;" not in livejs:
+    fail.append("easm-live.js 空租户分支缺 empty 短路（示例数据会被误标实时）")
+# ④ 数据源接入只存在于「设置与日志」页：绑定静态挂载点，禁止重新注入浮动条
+if "function bindSettings(" not in livejs:
+    fail.append("easm-live.js 未绑定设置页数据源（数据源接入应内聚于设置视图）")
+if "'livebar'" in livejs or '"livebar"' in livejs:
+    fail.append("easm-live.js 仍注入浮动 livebar（应仅存在于设置视图）")
+# ⑤ 七模块操作流接线：设置页真实探活/记录 + 排查范围读取授权单 + 页签同步
+for fn in ("function paintSettings(", "function loadScopeAuth(", "function startScopedSweep("):
+    if fn not in livejs:
+        fail.append(f"easm-live.js 缺七模块接线函数: {fn}")
+if "authz'" not in livejs:
+    fail.append("排查范围未读取授权单（/authz）——范围展示可能失真")
+if "'.nav-item, .ptab'" not in livejs:
+    fail.append("easm-live.js 视图同步未覆盖页面页签（.ptab）")
+# 空库诚实态：示例租户不得充当真实作用域，报告/排查须显式提示建档
+for marker in ("if (live.empty) return null;", "暂无客户与历史报告",
+               "后端为空库：请先在「客户总览」建档"):
+    if marker not in livejs:
+        fail.append(f"easm-live.js 缺空库诚实态守卫: {marker}")
+# CSV 导出须标注数据口径（示例/实时），禁止把内置示例当真实快照交付
+if "EASM.liveState = live;" not in livejs:
+    fail.append("live 层未暴露 liveState（导出无法判定实时/示例口径）")
+if "function demoNote(" not in appjs or "示例-" not in appjs:
+    fail.append("app.js CSV 导出缺数据口径标注（示例- 前缀/实时说明）")
+# 全部单位聚合在「单位均无资产」时须退化简单平均（0/0=NaN 会注入 SVG 并刷控制台）
+if "const avgOf = function (" not in appjs:
+    fail.append("app.js 概览聚合缺零资产保护（健康评分/闭环率可能为 NaN）")
+
+# ---- M4-04：MCP 全量开放守卫（WP-M4-04：tools/list ≥15 工具且全量携带 C-4 分级 level）----
+req = urllib.request.Request(
+    BASE + "/mcp",
+    data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode(),
+    headers={"Authorization": "Bearer " + TOKEN, "Content-Type": "application/json"},
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(req, timeout=10) as r:
+        mcp_out = json.loads(r.read().decode())
+    tools = mcp_out.get("result", {}).get("tools", [])
+    if len(tools) < 15:
+        fail.append(f"MCP 工具数应 ≥15（出口矩阵 §8.1），实际 {len(tools)}")
+    levels = {t.get("name"): t.get("level") for t in tools}
+    for name, lv in levels.items():
+        if lv not in ("readonly", "controlled", "dangerous"):
+            fail.append(f"MCP 工具 {name} level 非法: {lv!r}（C-4 分级口径）")
+    if levels.get("scan_active") != "dangerous":
+        fail.append("MCP scan_active 应为 dangerous（§8.2 分级表）")
+    if levels.get("scan_schedule") != "controlled" or levels.get("report_generate") != "controlled":
+        fail.append("MCP 受控级标注错误（scan_schedule/report_generate）")
+    print(f"MCP 工具守卫: {len(tools)} 个（readonly {sum(1 for v in levels.values() if v == 'readonly')} / "
+          f"controlled {sum(1 for v in levels.values() if v == 'controlled')} / "
+          f"dangerous {sum(1 for v in levels.values() if v == 'dangerous')}）")
+except Exception as e:  # noqa: BLE001
+    fail.append(f"/mcp tools/list 探测失败: {e}")
 
 if fail:
     print("LIVE SMOKE FAIL:\n- " + "\n- ".join(fail))

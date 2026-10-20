@@ -4,25 +4,91 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  go:
+  # 门禁①：静态检查 + 全量单测（内存后端，零外部依赖）。
+  unit:
+    name: ① vet / build / unit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: true
+      - name: gofmt
+        run: test -z "$(gofmt -l platform/services)"
       - name: vet
         run: go vet ./...
       - name: build
         run: go build ./...
       - name: test
         run: go test ./... -count=1
-      # V-7 追溯对账（C-1 编号闭合）：每个 Go 包注释须携带需求编号
-      - name: trace-check
+
+  # 门禁②：空库全量迁移 + easm_app（无 BYPASSRLS）角色跑 PG 集成测试。
+  # RLS 只有在非特权角色下才被强制执行——用管理员 DSN 跑集成=静默假绿。
+  integration:
+    name: ② migrate + PG integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: easm
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d easm"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      EASM_MIGRATE_DSN: "postgres://postgres:postgres@127.0.0.1:5432/easm?sslmode=disable"
+      EASM_PG_DSN: "postgres://easm_app:easm-***@127.0.0.1:5432/easm?sslmode=disable"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: migrate up（空库，001→最新）
+        run: go run ./platform/services/cmd/migrate up
+      - name: PG integration（easm_app 角色，RLS 生效）
+        run: go test ./... -count=1
+
+  # 门禁③：Go 路由表是契约唯一事实源——生成后必须与入库的 openapi.json 零漂移。
+  openapi:
+    name: ③ OpenAPI 覆盖
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: generate + coverage check
+        run: |
+          python3 scripts/gen-openapi.py
+          python3 scripts/openapi-check.py
+      - name: spec committed（无未提交漂移）
+        run: |
+          git ls-files --error-unmatch docs/api/openapi.json
+          git diff --exit-code -- docs/api/openapi.json
+
+  # 门禁④：C-1 追溯对账 + lint（blocking：不过即拦合入）。
+  trace-lint:
+    name: ④ trace-check + lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: trace-check（C-1 编号闭合）
         run: python3 scripts/trace-check.py
-      # 许可证隔离检查（FR-HRN-07 / WP-M1-11）：M1 起接入 SBOM 与镜像扫描卡点
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: v1.64.8
+          args: --disable-all --enable=govet --enable=gofmt

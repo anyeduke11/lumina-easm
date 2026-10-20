@@ -20,6 +20,12 @@ import (
 
 type DB struct{ sql *sql.DB }
 
+// Ping 就绪探针（/readyz）：真实依赖探活，失败即 503，不伪装 ready。
+func (d *DB) Ping(ctx context.Context) error { return d.sql.PingContext(ctx) }
+
+// Close 进程退出时释放连接池。
+func (d *DB) Close() error { return d.sql.Close() }
+
 // Open 建立连接池；dsn 应指向 easm_app 角色（无 SUPERUSER/BYPASSRLS，RLS 生效）。
 func Open(dsn string) (*DB, error) {
 	db, err := sql.Open("postgres", dsn)

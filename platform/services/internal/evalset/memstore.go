@@ -9,9 +9,10 @@ import (
 
 // MemStore 内存实现（单测/演示；PG 实现在 pgstore，双后端同契约）。
 type MemStore struct {
-	mu      sync.RWMutex
-	samples map[string]Sample
-	runs    []Run
+	mu       sync.RWMutex
+	samples  map[string]Sample
+	runs     []Run
+	promotes []Promote
 }
 
 // NewMemStore 构造空存储。
@@ -82,6 +83,31 @@ func (m *MemStore) ListRuns(_ context.Context, tenant string, limit int) ([]Run,
 	for _, r := range m.runs {
 		if r.Tenant == tenant {
 			out = append(out, r)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+// PutPromote 追加放量留痕。
+func (m *MemStore) PutPromote(_ context.Context, p Promote) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.promotes = append(m.promotes, p)
+	sort.Slice(m.promotes, func(i, j int) bool { return m.promotes[i].TS.After(m.promotes[j].TS) })
+	return nil
+}
+
+// ListPromotes 放量留痕历史（最新在前）。
+func (m *MemStore) ListPromotes(_ context.Context, tenant string, limit int) ([]Promote, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]Promote, 0, limit)
+	for _, p := range m.promotes {
+		if p.Tenant == tenant {
+			out = append(out, p)
 			if len(out) >= limit {
 				break
 			}

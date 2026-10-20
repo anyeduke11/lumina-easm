@@ -19,6 +19,7 @@ type shadowInput struct {
 	Domain      string            `json:"domain"`
 	Signals     ownership.Signals `json:"signals"`
 	EvidenceRef string            `json:"evidence_ref,omitempty"`
+	WithAI      bool              `json:"with_ai"` // ENH-03：请求方显式要求 AI 处置说明文案（默认确定性）
 }
 
 // handleShadowAdvise POST /v1/tenants/{id}/shadow:advise（只产出建议，不写任何东西）
@@ -43,18 +44,26 @@ func (s *Server) handleShadowAdvise(w http.ResponseWriter, r *http.Request) {
 		writeError(w, requestIDOf(r), http.StatusBadRequest, "invalid_request", "domain 必填")
 		return
 	}
-	adv, err := s.shadow.Advise(shadowit.Input{
+	sin := shadowit.Input{
 		Tenant: tid, Domain: in.Domain, Signals: in.Signals, EvidenceRef: in.EvidenceRef,
 		Identity: ownership.Identity{Tenant: t.ID, Org: t.Name, Short: t.Short,
 			Domains: t.RootDomains, CIDRs: t.CIDRs},
-	})
+	}
+	// M3-C-AI（ENH-03）：with_ai=true 且 provider 已装配 → 追加 AI 处置说明文案；
+	// 红线由域层保证（AI 只写 AIBasis，判定与动作集不变；未装配=ErrNoAI→501）。
+	var adv shadowit.Advice
+	if in.WithAI {
+		adv, err = s.shadow.AdviseWithAI(r.Context(), sin)
+	} else {
+		adv, err = s.shadow.Advise(sin)
+	}
 	if err != nil {
 		failFrom(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"advice": adv,
-		"note":   "建议无副作用：不写资产、不写图谱；纳管须经 /shadow/admit 人审（FR-MIN-003 不自动入账）",
+		"note":   "建议无副作用：不写资产、不写图谱；纳管须经 /shadow/admit 人审（FR-MIN-003 不自动入账）；ai_basis 仅为文案层，动作集不受影响",
 	})
 }
 

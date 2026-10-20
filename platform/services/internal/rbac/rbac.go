@@ -1,4 +1,5 @@
-// Package rbac 实现 8 角色最小权限矩阵与租户 Scope 判定（PRD F17.1 / FR-TEN-005）。
+// Package rbac 实现最小权限矩阵与 entity Scope 判定（PRD F17.1 / FR-TEN-005）。
+// 单用户监管形态：operator 使用 admin；R1..R8 保留为历史/测试别名，不再作为部署角色。
 package rbac
 
 import "errors"
@@ -27,14 +28,15 @@ type Principal struct {
 
 // rolePerms 为 8 角色矩阵 M0 最小版（R1 含红队视角变体；完整矩阵在 M1 扩展并接入视图）。
 var rolePerms = map[string][]Permission{
-	"R1": {PermReadAssets, PermWriteAssets, PermReadAudit},
-	"R2": {PermReadAssets, PermWriteAssets},
-	"R3": {PermReadAssets},
-	"R4": {PermReadAssets, PermNotify, PermReadAudit},
-	"R5": {PermReadAssets},
-	"R6": {PermReadAssets, PermWriteAssets},
-	"R7": {PermReadAssets, PermWriteAssets, PermManageTenants, PermReadAudit, PermNotify}, // 平台管理员全权（批八补：告警出口 dispatch 需 Notify）
-	"R8": {PermReadAssets, PermWriteAssets, PermNotify},
+	"admin": {PermReadAssets, PermWriteAssets, PermManageTenants, PermReadAudit, PermNotify},
+	"R1":    {PermReadAssets, PermWriteAssets, PermReadAudit},
+	"R2":    {PermReadAssets, PermWriteAssets},
+	"R3":    {PermReadAssets},
+	"R4":    {PermReadAssets, PermNotify, PermReadAudit},
+	"R5":    {PermReadAssets},
+	"R6":    {PermReadAssets, PermWriteAssets},
+	"R7":    {PermReadAssets, PermWriteAssets, PermManageTenants, PermReadAudit, PermNotify}, // 平台管理员全权（批八补：告警出口 dispatch 需 Notify）
+	"R8":    {PermReadAssets, PermWriteAssets, PermNotify},
 }
 
 func (p Principal) Can(perm Permission) bool {

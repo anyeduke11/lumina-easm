@@ -10,26 +10,39 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/wangdev88/easm-platform/platform/services/internal/ai"
+	"github.com/wangdev88/easm-platform/platform/services/internal/alert"
 	"github.com/wangdev88/easm-platform/platform/services/internal/asset"
 	"github.com/wangdev88/easm-platform/platform/services/internal/audit"
+	"github.com/wangdev88/easm-platform/platform/services/internal/authn"
 	"github.com/wangdev88/easm-platform/platform/services/internal/authz"
 	"github.com/wangdev88/easm-platform/platform/services/internal/candidate"
 	"github.com/wangdev88/easm-platform/platform/services/internal/classify"
 	"github.com/wangdev88/easm-platform/platform/services/internal/collect"
+	"github.com/wangdev88/easm-platform/platform/services/internal/confirm"
 	"github.com/wangdev88/easm-platform/platform/services/internal/darkweb"
+	"github.com/wangdev88/easm-platform/platform/services/internal/detect"
+	"github.com/wangdev88/easm-platform/platform/services/internal/discovery"
 	"github.com/wangdev88/easm-platform/platform/services/internal/evalset"
 	"github.com/wangdev88/easm-platform/platform/services/internal/evidence"
+	"github.com/wangdev88/easm-platform/platform/services/internal/finding"
 	"github.com/wangdev88/easm-platform/platform/services/internal/graph"
 	"github.com/wangdev88/easm-platform/platform/services/internal/intel"
+	"github.com/wangdev88/easm-platform/platform/services/internal/inventory"
+	"github.com/wangdev88/easm-platform/platform/services/internal/job"
 	"github.com/wangdev88/easm-platform/platform/services/internal/ledger"
+	"github.com/wangdev88/easm-platform/platform/services/internal/mm"
 	"github.com/wangdev88/easm-platform/platform/services/internal/monitor"
 	"github.com/wangdev88/easm-platform/platform/services/internal/notice"
 	"github.com/wangdev88/easm-platform/platform/services/internal/notify"
 	"github.com/wangdev88/easm-platform/platform/services/internal/ownership"
 	"github.com/wangdev88/easm-platform/platform/services/internal/plugin"
+	"github.com/wangdev88/easm-platform/platform/services/internal/projection"
 	"github.com/wangdev88/easm-platform/platform/services/internal/rbac"
 	"github.com/wangdev88/easm-platform/platform/services/internal/report"
 	"github.com/wangdev88/easm-platform/platform/services/internal/scoring"
@@ -38,6 +51,7 @@ import (
 	"github.com/wangdev88/easm-platform/platform/services/internal/sweep"
 	"github.com/wangdev88/easm-platform/platform/services/internal/syntax"
 	"github.com/wangdev88/easm-platform/platform/services/internal/tenant"
+	"github.com/wangdev88/easm-platform/platform/services/internal/usage"
 	"github.com/wangdev88/easm-platform/platform/services/internal/vuln"
 	"github.com/wangdev88/easm-platform/platform/services/internal/workorder"
 )
@@ -50,34 +64,52 @@ const (
 )
 
 type Server struct {
-	tenants  *tenant.Service
-	assets   *asset.Service
-	tokens   map[string]rbac.Principal
-	graph    GraphQuery         // 可选：IR-06 图谱读取；nil 时图谱端点返回 501
-	cls      *classify.Engine   // F6 判敏（无外部依赖，默认注入）
-	ledger   *ledger.Service    // F4 风险台账
-	sweeps   *sweep.Service     // F2 五阶段工作流
-	authz    *authz.Service     // 授权范围（CR-005 / 一票否决⑥）
-	plugins  *plugin.Registry   // 工具插件注册中心（FR-PLG）
-	vuln     *vuln.Service      // F9.1 漏洞库
-	intel    *intel.Service     // F9.3 情报库
-	own      *ownership.Service // FR-DSC-010 归属判定
-	mon      *monitor.Service   // F14 监测与预警（近似版）
-	notify   *notify.Service    // F14.4 告警统一出口
-	evid     evidence.Store     // ENH-05 证据对象存储（file|minio）；nil=端点 501
-	cands    *candidate.Service // WP-M1-05 候选契约（M2 前置）
-	col      *collect.Service   // M2-01 采集管道（repo.secret 首渠道）
-	dark     *darkweb.Service   // M2-02 暗网兜底/线索包（FR-CHN-005~008）
-	wos      *workorder.Service // M2-03 平台处置工单（FR-CHN-004 五态跟踪）
-	not      *notice.Service    // M2-04 线索通报与合规报送（FR-LGR-007/008、CR-002、A-08）
-	rpt      *report.Service    // M2-09 报告中心（FR-RPT-001~004：实时聚合/四受众/历史/md-json）
-	dispatch SweepDispatcher    // ENH-01：非 nil 时 sweep 走 Temporal 异步派发
-	scoreW   scoring.Weights    // M3-A 四因子权重（默认=登记口径，G8-01 待定稿）
-	scoreTh  scoring.Thresholds // M3-A 等级阈值（默认=登记口径）
-	paths    graph.PathQuery    // M3-B 攻击路径推演（MemPath/PGPath；nil=501）
-	secrets  *secret.Service    // M3-C 密钥有效性验证（FR-CHN-002；未就绪=501）
-	shadow   *shadowit.Service  // M3-C 影子 IT 收敛建议与纳管人审（FR-MIN-003；nil=501）
-	evals    *evalset.Service   // M3-E 评测集与反馈门禁（FR-VRF-004/AIL-7；nil=501）
+	tenants         *tenant.Service
+	assets          *asset.Service
+	tokens          map[string]rbac.Principal
+	graph           GraphQuery                  // 可选：IR-06 图谱读取；nil 时图谱端点返回 501
+	cls             *classify.Engine            // F6 判敏（无外部依赖，默认注入）
+	ledger          *ledger.Service             // F4 风险台账
+	sweeps          *sweep.Service              // F2 五阶段工作流
+	authz           *authz.Service              // 授权范围（CR-005 / 一票否决⑥）
+	plugins         *plugin.Registry            // 工具插件注册中心（FR-PLG）
+	vuln            *vuln.Service               // F9.1 漏洞库
+	intel           *intel.Service              // F9.3 情报库
+	own             *ownership.Service          // FR-DSC-010 归属判定
+	mon             *monitor.Service            // F14 监测与预警（近似版）
+	notify          *notify.Service             // F14.4 告警统一出口
+	evid            evidence.Store              // ENH-05 证据对象存储（file|minio）；nil=端点 501
+	cands           *candidate.Service          // WP-M1-05 候选契约（M2 前置）
+	col             *collect.Service            // M2-01 采集管道（repo.secret 首渠道）
+	dark            *darkweb.Service            // M2-02 暗网兜底/线索包（FR-CHN-005~008）
+	wos             *workorder.Service          // M2-03 平台处置工单（FR-CHN-004 五态跟踪）
+	not             *notice.Service             // M2-04 线索通报与合规报送（FR-LGR-007/008、CR-002、A-08）
+	rpt             *report.Service             // M2-09 报告中心（FR-RPT-001~004：实时聚合/四受众/历史/md-json）
+	dispatch        SweepDispatcher             // ENH-01：非 nil 时 sweep 走 Temporal 异步派发
+	scoreW          scoring.Weights             // M3-A 四因子权重（默认=登记口径，G8-01 待定稿）
+	scoreTh         scoring.Thresholds          // M3-A 等级阈值（默认=登记口径）
+	paths           graph.PathQuery             // M3-B 攻击路径推演（MemPath/PGPath；nil=501）
+	secrets         *secret.Service             // M3-C 密钥有效性验证（FR-CHN-002；未就绪=501）
+	shadow          *shadowit.Service           // M3-C 影子 IT 收敛建议与纳管人审（FR-MIN-003；nil=501）
+	evals           *evalset.Service            // M3-E 评测集与反馈门禁（FR-VRF-004/AIL-7；nil=501）
+	mm              *mm.Service                 // M3-D 多模态判敏（FR-CLS-006/AIL-5/6；ENH-03 未装配=501）
+	usageSvc        *usage.Service              // M4-07 计量与预算（FR-HRN-10；nil=计量端点不可用）
+	confirm         *confirm.Service            // 单用户高危动作确认（FR-LGR-005/CR-001/AX-5）
+	confirmRequired bool                        // EASM_REQUIRE_CONFIRMATION 开启（默认）时强制危险动作携带确认
+	auditLog        audit.Log                   // 越域/越权读的 deny 留痕（一票否决④）
+	ready           func(context.Context) error // /readyz 真实依赖探活；nil=无外部依赖（内存模式）
+	oidc            *authn.OIDC                 // OIDC access token 校验；nil=仅 dev 令牌
+	breakglass      *authn.BreakGlass           // 预置应急凭据；nil=未启用
+	passkey         *authn.Passkey              // ES256 challenge-response step-up；nil=未配置
+	inventory       *inventory.Service          // Phase 1 资产身份/观察流；nil=501
+	findings        *finding.Service            // Phase 1 Finding 生命周期；nil=501
+	jobs            *job.Service                // Phase 1 任务队列；nil=501
+	discovery       *discovery.Service          // Phase 1 发现编排；nil=501
+	projector       *projection.Projector       // Phase 2 Finding->ledger 投影；nil=501
+	alerts          *alert.Service              // Phase 2 Finding 告警；nil=501
+	detector        *detect.Detector            // Phase 2 观察流自动判敏；nil=仅手动 Finding
+	assetStale      time.Duration               // Phase 3 资产衰减：活跃期
+	assetRetire     time.Duration               // Phase 3 资产衰减：保留期
 }
 
 // SweepDispatcher 编排派发接缝（tdispatcher.Dispatcher 满足；SDK 类型不外泄，AX-6）。
@@ -135,11 +167,67 @@ func WithShadow(sh *shadowit.Service) Option { return func(s *Server) { s.shadow
 // WithEval 注入 M3-E 评测集与反馈门禁面（nil=501 eval_unavailable）。
 func WithEval(ev *evalset.Service) Option { return func(s *Server) { s.evals = ev } }
 
+// WithMM 注入 M3-D 多模态判敏面（ENH-03 未装配=501 mm_unavailable）。
+func WithMM(m *mm.Service) Option { return func(s *Server) { s.mm = m } }
+
+// WithUsage 注入 M4-07 计量与预算面（FR-HRN-10；nil=计量端点 501 usage_unavailable）。
+func WithUsage(u *usage.Service) Option { return func(s *Server) { s.usageSvc = u } }
+
+// WithOIDC 注入 OIDC access token 校验（生产替代 dev 静态令牌）。
+func WithOIDC(o *authn.OIDC) Option { return func(s *Server) { s.oidc = o } }
+
+// WithBreakGlass 注入预置应急凭据；每次使用写审计。
+func WithBreakGlass(b *authn.BreakGlass) Option { return func(s *Server) { s.breakglass = b } }
+
+// WithPasskey 注入 ES256 challenge-response step-up；nil=passkey 未配置。
+func WithPasskey(p *authn.Passkey) Option { return func(s *Server) { s.passkey = p } }
+
+// WithInventory 注入 Phase 1 资产身份/观察流。
+func WithInventory(v *inventory.Service) Option { return func(s *Server) { s.inventory = v } }
+
+// WithFindings 注入 Phase 1 Finding 生命周期。
+func WithFindings(f *finding.Service) Option { return func(s *Server) { s.findings = f } }
+
+// WithJobs 注入 Phase 1 任务队列。
+func WithJobs(j *job.Service) Option { return func(s *Server) { s.jobs = j } }
+
+// WithDiscovery 注入 Phase 1 发现编排。
+func WithDiscovery(d *discovery.Service) Option { return func(s *Server) { s.discovery = d } }
+
+// WithProjection 注入 Phase 2 Finding->ledger 投影。
+func WithProjection(p *projection.Projector) Option { return func(s *Server) { s.projector = p } }
+
+// WithAlerts 注入 Phase 2 Finding 告警。
+func WithAlerts(a *alert.Service) Option { return func(s *Server) { s.alerts = a } }
+
+// WithDetector 注入 Phase 2 观察流自动判敏。
+func WithDetector(d *detect.Detector) Option { return func(s *Server) { s.detector = d } }
+
+// WithAssetDecay 注入 Phase 3 资产衰减阈值。
+func WithAssetDecay(stale, retire time.Duration) Option {
+	return func(s *Server) { s.assetStale, s.assetRetire = stale, retire }
+}
+
+// WithConfirmation 注入单用户高危动作确认；required=true（EASM_REQUIRE_CONFIRMATION 默认）
+// 时危险动作必须携带 X-EASM-Confirmation。
+func WithConfirmation(c *confirm.Service, required bool) Option {
+	return func(s *Server) { s.confirm, s.confirmRequired = c, required }
+}
+
+// WithAudit 注入审计日志（越域/越权读的 deny 留痕）；未注入=进程内 MemLog。
+func WithAudit(l audit.Log) Option { return func(s *Server) { s.auditLog = l } }
+
+// WithReady 注入就绪探针（PG Ping 等真实依赖）；nil=内存模式（无外部依赖）。
+func WithReady(check func(context.Context) error) Option {
+	return func(s *Server) { s.ready = check }
+}
+
 func New(t *tenant.Service, a *asset.Service, tokens map[string]rbac.Principal, opts ...Option) *Server {
 	s := &Server{
 		tenants: t, assets: a, tokens: tokens,
-		cls:    classify.New(),
-		ledger: ledger.NewService(ledger.NewMemStore(), &audit.MemLog{}),
+		cls:      classify.New(),
+		ledger:   ledger.NewService(ledger.NewMemStore(), &audit.MemLog{}),
+		auditLog: &audit.MemLog{},
 	}
 	for _, o := range opts {
 		o(s)
@@ -152,6 +240,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.Handle("GET /v1/tenants", s.auth(s.handleListTenants))
 	mux.Handle("POST /v1/tenants", s.auth(s.handleCreateTenant))
 	mux.Handle("GET /v1/tenants/{id}/assets", s.auth(s.handleListAssets))
@@ -226,6 +315,41 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/tenants/{id}/evalset:run", s.auth(s.handleEvalRun))
 	mux.Handle("GET /v1/tenants/{id}/evalset/runs", s.auth(s.handleEvalRuns))
 	mux.Handle("GET /v1/tenants/{id}/evalset/gate", s.auth(s.handleEvalGate))
+	mux.Handle("POST /v1/tenants/{id}/evalset/promote", s.auth(s.handleEvalPromote))
+	// M4-03 排查任务单（FR-MON-003：触发→任务单→人工闭环）
+	mux.Handle("GET /v1/tenants/{id}/monitors/tasks", s.auth(s.handleMonitorTasksList))
+	mux.Handle("POST /v1/tenants/{id}/monitors/tasks:poc", s.auth(s.handleMonitorTasksPoc))
+	mux.Handle("POST /v1/tenants/{id}/monitors/tasks/{tid}/done", s.auth(s.handleMonitorTaskDone))
+	// M4-07 计量与预算（FR-HRN-10：成本统计与预算告警）
+	mux.Handle("GET /v1/tenants/{id}/usage/summary", s.auth(s.handleUsageSummary))
+	mux.Handle("POST /v1/tenants/{id}/usage/budget", s.auth(s.handleUsageBudget))
+	// M3-D 多模态判敏（WP-M3-03 / ENH-03；未装配=501 mm_unavailable）
+	mux.Handle("POST /v1/tenants/{id}/mm:analyze", s.auth(s.handleMmAnalyze))
+	// 单用户高危动作确认（FR-LGR-005/CR-001/AX-5）：create + read。
+	mux.Handle("POST /v1/session/passkey/challenge", s.auth(s.handlePasskeyChallenge))
+	mux.Handle("POST /v1/session/passkey/verify", s.auth(s.handlePasskeyVerify))
+	mux.Handle("POST /v1/confirmations", s.auth(s.handleCreateConfirmation))
+	mux.Handle("GET /v1/confirmations/{id}", s.auth(s.handleGetConfirmation))
+	// Phase 1 EASM 核心：观察流 / 资产 / Finding / Job。
+	mux.Handle("POST /v1/tenants/{id}/observations", s.auth(s.handleIngestObservation))
+	mux.Handle("GET /v1/tenants/{id}/inventory", s.auth(s.handleListInventory))
+	mux.Handle("GET /v1/tenants/{id}/inventory/{aid}", s.auth(s.handleGetInventoryAsset))
+	mux.Handle("GET /v1/tenants/{id}/inventory/{aid}/observations", s.auth(s.handleInventoryObservations))
+	mux.Handle("POST /v1/tenants/{id}/inventory/{aid}/state", s.auth(s.handleSetInventoryState))
+	mux.Handle("POST /v1/tenants/{id}/inventory:decay", s.auth(s.handleDecayInventory))
+	mux.Handle("POST /v1/tenants/{id}/discovery", s.auth(s.handleStartDiscovery))
+	mux.Handle("GET /v1/tenants/{id}/jobs", s.auth(s.handleListJobs))
+	mux.Handle("POST /v1/tenants/{id}/jobs/{jid}/cancel", s.auth(s.handleCancelJob))
+	mux.Handle("GET /v1/tenants/{id}/findings", s.auth(s.handleListFindings))
+	mux.Handle("POST /v1/tenants/{id}/findings", s.auth(s.handleCreateFinding))
+	mux.Handle("GET /v1/tenants/{id}/findings/{fid}", s.auth(s.handleGetFinding))
+	mux.Handle("POST /v1/tenants/{id}/findings/{fid}/validate", s.auth(s.handleValidateFinding))
+	mux.Handle("POST /v1/tenants/{id}/findings/{fid}/close", s.auth(s.handleCloseFinding))
+	mux.Handle("POST /v1/tenants/{id}/findings/{fid}/project", s.auth(s.handleProjectFinding))
+	mux.Handle("POST /v1/tenants/{id}/findings:bulk", s.auth(s.handleBulkFindings))
+	mux.Handle("GET /v1/tenants/{id}/alerts", s.auth(s.handleListFindingAlerts))
+	mux.Handle("POST /v1/tenants/{id}/alerts/{aid}/ack", s.auth(s.handleAckAlert))
+	mux.Handle("POST /v1/tenants/{id}/alerts:dispatch", s.auth(s.handleDispatchFindingAlerts))
 	mux.Handle("POST /v1/tenants/{id}/workorders", s.auth(s.handleCreateWorkOrder))
 	mux.Handle("GET /v1/tenants/{id}/workorders", s.auth(s.handleListWorkOrders))
 	mux.Handle("GET /v1/tenants/{id}/workorders/{wid}", s.auth(s.handleGetWorkOrder))
@@ -241,7 +365,59 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/tenants/{id}/reports", s.auth(s.handleListReports))
 	mux.Handle("GET /v1/tenants/{id}/reports/{rid}", s.auth(s.handleGetReport))
 	mux.Handle("GET /v1/tenants/{id}/reports/{rid}/export", s.auth(s.handleExportReport))
-	return mux
+	return recoverPanic(aliasEntities(mux))
+}
+
+// handleReady 就绪探针：真实依赖（PG 等）不可用即 503；错误细节只进日志，
+// 回执不泄露 DSN/内部地址。未注入探针=内存模式（无外部依赖）=ready。
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	if s.ready != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := s.ready(ctx); err != nil {
+			slog.Error("readyz: dependency check failed", "err", err)
+			writeError(w, newRequestID(), http.StatusServiceUnavailable, "not_ready", "依赖未就绪")
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+}
+
+// recoverPanic 兜底未捕获 panic：500 + 统一错误体（不泄露堆栈给调用方），
+// 堆栈写服务端日志（含方法与路径），防止单请求 panic 拖垮整个进程。
+func recoverPanic(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if v := recover(); v != nil {
+				slog.Error("httpapi: panic recovered", "method", r.Method, "path", r.URL.Path,
+					"panic", v, "stack", string(debug.Stack()))
+				rid := requestIDOf(r)
+				if rid == "" {
+					rid = newRequestID()
+				}
+				writeError(w, rid, http.StatusInternalServerError, "internal", "服务内部错误")
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+// aliasEntities 让 /v1/entities 成为 /v1/tenants 的一等别名。
+// 单用户监管形态对外称「被监管单位」；内部保留 tenant 表/服务作为 entity 数据域的
+// legacy 实现（tenant_id 列即 entity_id，RLS 继续生效），避免复制 50+ 条路由。
+func aliasEntities(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if p == "/v1/entities" || strings.HasPrefix(p, "/v1/entities/") {
+			r2 := r.Clone(r.Context())
+			u := *r.URL
+			u.Path = "/v1/tenants" + strings.TrimPrefix(p, "/v1/entities")
+			r2.URL = &u
+			next.ServeHTTP(w, r2)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // ---- 中间件与工具 ----
@@ -251,6 +427,16 @@ func (s *Server) auth(next http.HandlerFunc) http.Handler {
 		rid := newRequestID()
 		tok := bearerToken(r)
 		p, ok := s.tokens[tok]
+		if !ok && s.oidc != nil {
+			if pp, err := s.oidc.Verify(r.Context(), tok); err == nil {
+				p, ok = pp, true
+			}
+		}
+		if !ok && s.breakglass != nil && s.breakglass.Verify(tok) {
+			p = rbac.Principal{UserID: "breakglass", Role: "admin", TenantIDs: []string{"*"}}
+			ok = true
+			s.breakglass.Use(r.Context(), rid)
+		}
 		if !ok {
 			writeError(w, rid, http.StatusUnauthorized, "unauthenticated", "missing or invalid token")
 			return
@@ -269,6 +455,17 @@ func principalOf(r *http.Request) rbac.Principal {
 func requestIDOf(r *http.Request) string {
 	rid, _ := r.Context().Value(keyRequestID).(string)
 	return rid
+}
+
+// denyAccess 统一越权读出口：先落 deny 审计再返回 403（一票否决④：跨域读必须留痕）。
+func (s *Server) denyAccess(w http.ResponseWriter, r *http.Request, action, tenant, resource, msg string) {
+	if s.auditLog != nil {
+		_ = s.auditLog.Append(r.Context(), audit.Entry{
+			Actor: principalOf(r).UserID, Action: action, TenantID: tenant,
+			Resource: resource, Result: audit.ResultDeny, RequestID: requestIDOf(r),
+		})
+	}
+	writeError(w, requestIDOf(r), http.StatusForbidden, "forbidden", msg)
 }
 
 func bearerToken(r *http.Request) string {
@@ -318,8 +515,35 @@ func mapErr(err error) (int, string) {
 		return http.StatusForbidden, "cross_tenant_denied"
 	case errors.Is(err, rbac.ErrForbidden):
 		return http.StatusForbidden, "forbidden"
-	case errors.Is(err, tenant.ErrNotFound), errors.Is(err, asset.ErrNotFound), errors.Is(err, ledger.ErrNotFound):
+	case errors.Is(err, collect.ErrToolMissing):
+		return http.StatusNotImplemented, "tool_unavailable" // 能力缺失≠扫描失败（不伪造成失败/空结果）
+	case errors.Is(err, collect.ErrBadTarget):
+		return http.StatusBadRequest, "invalid_request"
+	case errors.Is(err, confirm.ErrNotFound):
 		return http.StatusNotFound, "not_found"
+	case errors.Is(err, confirm.ErrInvalid):
+		return http.StatusBadRequest, "invalid_confirmation"
+	case errors.Is(err, confirm.ErrExpired):
+		return http.StatusGone, "confirmation_expired"
+	case errors.Is(err, confirm.ErrConsumed):
+		return http.StatusConflict, "confirmation_consumed"
+	case errors.Is(err, tenant.ErrNotFound), errors.Is(err, asset.ErrNotFound), errors.Is(err, ledger.ErrNotFound),
+		errors.Is(err, inventory.ErrNotFound), errors.Is(err, finding.ErrNotFound), errors.Is(err, job.ErrNotFound):
+		return http.StatusNotFound, "not_found"
+	case errors.Is(err, inventory.ErrInvalid), errors.Is(err, finding.ErrInvalid), errors.Is(err, job.ErrInvalid), errors.Is(err, discovery.ErrInvalid):
+		return http.StatusBadRequest, "invalid_request"
+	case errors.Is(err, finding.ErrState), errors.Is(err, job.ErrState):
+		return http.StatusConflict, "illegal_state_transition"
+	case errors.Is(err, finding.ErrDuplicate), errors.Is(err, ledger.ErrDuplicate):
+		return http.StatusConflict, "duplicate"
+	case errors.Is(err, alert.ErrNotFound):
+		return http.StatusNotFound, "not_found"
+	case errors.Is(err, alert.ErrInvalid):
+		return http.StatusBadRequest, "invalid_request"
+	case errors.Is(err, alert.ErrState):
+		return http.StatusConflict, "illegal_state_transition"
+	case errors.Is(err, projection.ErrNotConfirmed):
+		return http.StatusUnprocessableEntity, "finding_not_confirmed"
 	case errors.Is(err, tenant.ErrDuplicate), errors.Is(err, asset.ErrDuplicate), errors.Is(err, ledger.ErrDuplicate):
 		return http.StatusConflict, "duplicate"
 	case errors.Is(err, tenant.ErrInvalid), errors.Is(err, asset.ErrInvalid), errors.Is(err, ledger.ErrInvalid), errors.Is(err, sweep.ErrUnknownPhase):
@@ -340,10 +564,26 @@ func mapErr(err error) (int, string) {
 		return http.StatusForbidden, "second_auth_required"
 	case errors.Is(err, plugin.ErrContract):
 		return http.StatusUnprocessableEntity, "invalid_contract"
+	case errors.Is(err, monitor.ErrTaskClosed):
+		return http.StatusConflict, "task_closed"
+	case errors.Is(err, monitor.ErrTaskNotFound):
+		return http.StatusNotFound, "not_found"
+	case errors.Is(err, monitor.ErrTaskInvalid):
+		return http.StatusBadRequest, "invalid_request"
+	case errors.Is(err, usage.ErrInvalid):
+		return http.StatusBadRequest, "invalid_request"
 	case errors.Is(err, evalset.ErrInvalid), errors.Is(err, evalset.ErrNoSamples):
 		return http.StatusBadRequest, "invalid_request"
+	case errors.Is(err, evalset.ErrGateBlocked):
+		return http.StatusForbidden, "eval_gate_blocked"
 	case errors.Is(err, evalset.ErrSampleNotFound):
 		return http.StatusNotFound, "not_found"
+	case errors.Is(err, shadowit.ErrNoAI), errors.Is(err, mm.ErrNoProvider):
+		return http.StatusNotImplemented, "ai_unavailable"
+	case errors.Is(err, mm.ErrInvalid):
+		return http.StatusBadRequest, "invalid_request"
+	case errors.Is(err, ai.ErrUpstream):
+		return http.StatusBadGateway, "ai_upstream_error"
 	case errors.Is(err, workorder.ErrInvalid):
 		return http.StatusBadRequest, "invalid_request"
 	case errors.Is(err, workorder.ErrIllegalTransition):

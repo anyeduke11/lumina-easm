@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -46,8 +47,86 @@ type Ledger interface {
 // Exec 子进程执行器（测试注入假执行器；DefaultExec 真实调用）。
 type Exec func(ctx context.Context, bin string, args []string) error
 
+var (
+	// ErrToolMissing 工具未安装（HTTP 映射 501 tool_unavailable：能力缺失≠扫描失败）。
+	ErrToolMissing = errors.New("collect: tool not installed")
+	// ErrBadTarget 目标/端口语法非法（HTTP 映射 400：执行前拒绝，不进子进程）。
+	ErrBadTarget = errors.New("collect: invalid target")
+)
+
+// requireTool 执行前预检（不在 PATH=立即上浮，不把「工具缺失」伪装成扫描无发现）。
+func requireTool(bin string) error {
+	if _, err := exec.LookPath(bin); err != nil {
+		return fmt.Errorf("%w: %s（请安装后重试）", ErrToolMissing, bin)
+	}
+	return nil
+}
+
+// validHost 目标语法闸：拒绝选项注入（首字符 '-'）与非法字符（nmap 参数是独立 argv，
+// 但目标若形如 "-iL" 会被工具当成选项——必须在执行前拒绝）。
+func validHost(h string) error {
+	if h == "" || strings.HasPrefix(h, "-") || len(h) > 253 {
+		return fmt.Errorf("%w: 主机 %q", ErrBadTarget, h)
+	}
+	for _, r := range h {
+		ok := r == '.' || r == '-' || r == ':' || r == '_' ||
+			r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z'
+		if !ok {
+			return fmt.Errorf("%w: 主机 %q 含非法字符", ErrBadTarget, h)
+		}
+	}
+	return nil
+}
+
+// validPorts 端口表达式闸：逗号分隔的单端口/升序区间，范围 1-65535（拒 '-' 开头的选项注入）。
+func validPorts(s string) error {
+	if strings.TrimSpace(s) == "" || strings.HasPrefix(s, "-") {
+		return fmt.Errorf("%w: 端口 %q", ErrBadTarget, s)
+	}
+	digits := func(x string) bool {
+		if x == "" {
+			return false
+		}
+		for _, r := range x {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+		return true
+	}
+	for _, tok := range strings.Split(s, ",") {
+		lo, hi, hasRange := tok, tok, false
+		if i := strings.IndexByte(tok, '-'); i >= 0 {
+			lo, hi, hasRange = tok[:i], tok[i+1:], true
+		}
+		l, err := strconv.Atoi(lo)
+		if !digits(lo) || err != nil || l < 1 || l > 65535 {
+			return fmt.Errorf("%w: 端口 %q", ErrBadTarget, tok)
+		}
+		if hasRange {
+			h, err := strconv.Atoi(hi)
+			if !digits(hi) || err != nil || h < l || h > 65535 {
+				return fmt.Errorf("%w: 端口区间 %q", ErrBadTarget, tok)
+			}
+		}
+	}
+	return nil
+}
+
+// literalIP 返回字面量 IP（去 IPv6 方括号）；非 IP 返回空串。
+func literalIP(host string) string {
+	h := strings.Trim(host, "[]")
+	if net.ParseIP(h) != nil {
+		return h
+	}
+	return ""
+}
+
 // DefaultExec gitleaks 子进程调用（CLI 形态=AX-6 原定契约；D5 本地部署形态）。
 var DefaultExec Exec = func(ctx context.Context, bin string, args []string) error {
+	if err := requireTool(bin); err != nil {
+		return err
+	}
 	out, err := exec.CommandContext(ctx, bin, args...).CombinedOutput()
 	if err != nil {
 		s := string(out)
@@ -129,6 +208,11 @@ func (s *Service) ScanRepo(ctx context.Context, p rbac.Principal, reqID, tenant,
 	}
 	if owner == "" {
 		owner = "安全运营"
+	}
+	if d := strings.TrimSpace(dir); d == "" || strings.HasPrefix(d, "-") {
+		return res, fmt.Errorf("%w: 目录 %q", ErrBadTarget, dir) // 防 gitleaks 选项注入
+	} else {
+		dir = d
 	}
 	tmp, err := os.MkdirTemp("", "easm-collect")
 	if err != nil {
@@ -361,6 +445,19 @@ func (s *Service) ScanPort(ctx context.Context, p rbac.Principal, reqID, tenant,
 	if ports == "" {
 		ports = defaultPorts
 	}
+	// 执行前语法闸（拒选项注入/非法端口表达式）+ 字面量 IP 的细目标闸前置
+	// （范围外 IP 不启动 nmap；域名目标仍由扫后逐端口 CheckTarget 把关）。
+	if err := validHost(target); err != nil {
+		return res, err
+	}
+	if err := validPorts(ports); err != nil {
+		return res, err
+	}
+	if ip := literalIP(target); ip != "" {
+		if err := s.az.CheckTarget(ctx, p, reqID, tenant, ip, 0); err != nil {
+			return res, err
+		}
+	}
 	tmp, err := os.MkdirTemp("", "easm-scanport")
 	if err != nil {
 		return res, err
@@ -466,8 +563,11 @@ func (s *Service) ScanDir(ctx context.Context, p rbac.Principal, reqID, tenant, 
 	}
 	// 细目标闸：爆破目标（host:port）须在授权面内，范围外整站拒爆（403 上浮）。
 	u, err := url.Parse(target)
-	if err != nil || u.Hostname() == "" {
-		return res, fmt.Errorf("collect: 非法爆破目标 URL %q", target)
+	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return res, fmt.Errorf("%w: 非法爆破目标 URL %q", ErrBadTarget, target)
+	}
+	if err := validHost(u.Hostname()); err != nil {
+		return res, err
 	}
 	port := 80
 	if u.Scheme == "https" {
@@ -475,8 +575,8 @@ func (s *Service) ScanDir(ctx context.Context, p rbac.Principal, reqID, tenant, 
 	}
 	if ps := u.Port(); ps != "" {
 		port, err = strconv.Atoi(ps)
-		if err != nil {
-			return res, fmt.Errorf("collect: 非法端口 %q: %w", ps, err)
+		if err != nil || port < 1 || port > 65535 {
+			return res, fmt.Errorf("%w: 非法端口 %q", ErrBadTarget, ps)
 		}
 	}
 	if err := s.az.CheckTarget(ctx, p, reqID, tenant, u.Hostname(), port); err != nil {

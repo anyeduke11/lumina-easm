@@ -19,3 +19,17 @@ evidence-store/
 *.dump
 *.tar
 *.tmp
+
+# 本地运行态与导出（不属代码）
+.run/
+__pycache__/
+EASM-单位风险汇总-*.csv
+
+# 内部上位文档 / 设计产物（不随公开仓库分发）
+docs/EASM-AI-Native-Platform/
+docs/Design_AI-Native_EASM_System/
+docs/Step Studio/
+docs/*.html
+
+# 本地 env（模板 scripts/easm.env.example 入库）
+scripts/easm.env

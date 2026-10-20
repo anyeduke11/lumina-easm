@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/wangdev88/easm-platform/platform/services/internal/monitor"
 	"github.com/wangdev88/easm-platform/platform/services/internal/rbac"
 )
 
@@ -16,8 +17,15 @@ func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, requestIDOf(r), http.StatusNotImplemented, "monitor_unavailable", "监测预警未启用")
 		return
 	}
+	p := principalOf(r)
 	items := s.mon.List(r.URL.Query().Get("kind"))
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	visible := make([]monitor.Alert, 0, len(items))
+	for _, a := range items {
+		if p.InScope(a.TenantID) { // 告警行级租户闸（一票否决④）
+			visible = append(visible, a)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": visible, "total": len(visible)})
 }
 
 func (s *Server) handleCreateMonitor(w http.ResponseWriter, r *http.Request) {
@@ -55,6 +63,10 @@ func (s *Server) handleCreateMonitor(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListMonitors(w http.ResponseWriter, r *http.Request) {
 	if s.mon == nil {
 		writeError(w, requestIDOf(r), http.StatusNotImplemented, "monitor_unavailable", "监测预警未启用")
+		return
+	}
+	if !principalOf(r).Can(rbac.PermManageTenants) { // 周期任务=平台级配置读
+		s.denyAccess(w, r, "monitor.list", "", "/v1/monitors", "无管理域权限")
 		return
 	}
 	type entry struct {

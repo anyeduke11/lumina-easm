@@ -198,6 +198,43 @@ func (s *Server) handleEvalRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"run": run})
 }
 
+// handleEvalPromote POST /v1/tenants/{id}/evalset/promote
+// 灰度放量动作面（AIL-7 执行点）：消费门禁判定——未放行 403（理由随行）；
+// 放行落留痕（谁在哪个 run 下放量+阈值口径快照，020 落库可审计）。
+func (s *Server) handleEvalPromote(w http.ResponseWriter, r *http.Request) {
+	if !s.evalReady() {
+		writeError(w, requestIDOf(r), http.StatusNotImplemented, "eval_unavailable", "评测集未装配")
+		return
+	}
+	p := principalOf(r)
+	if !p.Can(rbac.PermWriteAssets) {
+		writeError(w, requestIDOf(r), http.StatusForbidden, "forbidden", "无写入权限")
+		return
+	}
+	tid := r.PathValue("id")
+	if _, err := s.tenants.Get(r.Context(), p, requestIDOf(r), tid); err != nil {
+		failFrom(w, r, err)
+		return
+	}
+	var in struct {
+		By   string `json:"by"`
+		Note string `json:"note"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&in); err != nil {
+		writeError(w, requestIDOf(r), http.StatusBadRequest, "invalid_request", "malformed JSON body")
+		return
+	}
+	promote, d, err := s.evals.Promote(r.Context(), tid, in.By, in.Note)
+	if err != nil {
+		failFrom(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"tenant": tid, "promote": promote, "gate": d,
+		"basis": "放量动作已按门禁判定放行并留痕（run_id=放行依据；thresholds=放行时口径快照，换配置前后可对账）",
+	})
+}
+
 // handleEvalRuns GET /v1/tenants/{id}/evalset/runs
 func (s *Server) handleEvalRuns(w http.ResponseWriter, r *http.Request) {
 	if !s.evalReady() {

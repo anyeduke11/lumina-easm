@@ -32,6 +32,9 @@ func (s *Server) handleCreateNotice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, requestIDOf(r), http.StatusBadRequest, "invalid_request", "ledger_id 与 target 必填")
 		return
 	}
+	if !s.requireConfirmation(w, r, r.PathValue("id"), "notice.create", in.LedgerID) {
+		return
+	}
 	n, err := s.not.Create(r.Context(), p, requestIDOf(r), r.PathValue("id"), in.LedgerID, in.Target)
 	if err != nil {
 		failFrom(w, r, err)

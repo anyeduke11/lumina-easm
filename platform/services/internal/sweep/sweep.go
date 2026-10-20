@@ -577,8 +577,8 @@ func (s *Service) fileHits(ctx context.Context, p rbac.Principal, a asset.Asset,
 		phase = a.Source[:2]
 	}
 	n := 0
-	// V-5 零误报门1：同一次判定轮内命中同一资产的多个规则互为独立信源（跨规则交叉去噪）；
-	// 单规则命中=单源证据，「严重」将在 ledger.Create 降级为「高」并留痕（不静默）。
+	// V-5 零误报门1：同一判定轮的多条规则属**同一 rule 通道**，不构成互证；
+	// 单通道命中若申报「严重」，由 ledger.Create 按独立信源通道数降级为「高」并留痕。
 	xchk := make([]string, 0, len(hits))
 	for _, h := range hits {
 		xchk = append(xchk, "rule:"+h.RuleID)

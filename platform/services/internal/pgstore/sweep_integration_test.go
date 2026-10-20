@@ -21,13 +21,18 @@ func TestSweepStoreContractPG(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	sw := &sweep.Sweep{ID: "S-ITEST-1", Tenant: "itest-t", Phases: []string{"P1", "P2"}, Status: sweep.StatusRunning,
-		Steps: []sweep.StepRun{{Phase: "P1", Step: "基础域名归集", Status: "done", Outputs: []string{"清单"}, NewIssues: 3}}}
+		Steps:     []sweep.StepRun{{Phase: "P1", Step: "基础域名归集", Status: "done", Outputs: []string{"清单"}, NewIssues: 3}},
+		RateLimit: 50, PacedMS: 1250}
 	if err := st.Save(ctx, sw); err != nil {
 		t.Fatal(err)
 	}
 	got, ok, err := st.Get(ctx, "S-ITEST-1")
 	if !ok || err != nil {
 		t.Fatalf("回读失败 %v %v", ok, err)
+	}
+	// 限速消费留痕必须往返（P0-5：此前 PG 侧静默丢字段=双后端漂移）
+	if got.RateLimit != 50 || got.PacedMS != 1250 {
+		t.Errorf("rate_limit/paced_ms 未落 PG: rate=%d paced=%d", got.RateLimit, got.PacedMS)
 	}
 	if got.Findings != 0 && got.Steps[0].NewIssues != 3 {
 		t.Errorf("steps JSONB 反序列化不完整: %+v", got.Steps)
@@ -46,6 +51,9 @@ func TestSweepStoreContractPG(t *testing.T) {
 	again, _, _ := st.Get(ctx, "S-ITEST-1")
 	if again.Status != sweep.StatusDone || len(again.Steps) != 2 || again.EndedAt == nil {
 		t.Errorf("upsert/ended_at 失效: %+v", again)
+	}
+	if again.RateLimit != 50 || again.PacedMS != 1250 {
+		t.Errorf("upsert 后限速留痕丢失: rate=%d paced=%d", again.RateLimit, again.PacedMS)
 	}
 	// 覆盖度快照行可存可读（与内存契约同形）
 	cov := &sweep.Sweep{ID: "COV-itest-t", Tenant: "itest-t", Status: "snapshot",

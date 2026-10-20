@@ -25,6 +25,11 @@ func TestRoleMatrixDeniesAgentAdminPowers(t *testing.T) {
 	if viewer.Can(PermWriteAssets) {
 		t.Error("R5 情报分析师不应有 write_assets 权限")
 	}
+
+	single := Principal{UserID: "u-admin", Role: "admin", TenantIDs: []string{"*"}}
+	if !single.Can(PermManageTenants) || !single.Can(PermNotify) || !single.Can(PermReadAudit) {
+		t.Error("单用户 admin 应具备管理/通报/审计权限")
+	}
 }
 
 // 为什么：InScope 是行级隔离的第一道闸（FR-TEN-005 / 一票否决④）。

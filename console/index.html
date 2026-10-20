@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sentinel EASM · AI Native 外部攻击面与敏感信息泄露排查管理平台</title>
+<title>Lumina EASM · AI Native 外部攻击面与敏感信息泄露排查管理平台</title>
 <meta name="description" content="AI Native 外部攻击面管理系统 —— 全维度资产发现、攻击面挖掘、持续监控、第三方情报集成、MCP 接入与 Agent 数据消费。">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2322d3ee' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M12 2 4 6v6c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6l-8-4z'/%3E%3Cpath d='m9 12 2 2 4-4'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="light">
 
 <div class="app">
 
@@ -22,116 +22,47 @@
         </svg>
       </div>
       <div class="brand-txt">
-        <h1>Sentinel EASM</h1>
+        <h1>Lumina EASM</h1>
         <p>AI Native ASM</p>
       </div>
     </div>
 
     <nav class="nav" id="nav">
-      <div class="nav-label">排查治理</div>
-      <a class="nav-item on" data-view="overview">
+      <div class="nav-label">运营</div>
+      <a class="nav-item on" data-module="home" data-view="overview">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
-        排查驾驶舱
-      </a>
-      <a class="nav-item" data-view="workflow">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M3 5.5h5.5L11 9h10v9.5H3z"/><path d="M8 9v4.5M13.5 9v4.5M19 9v4.5"/></svg>
-        五阶段排查工作流
-        <span class="pill" id="navPhaseCount">5</span>
-      </a>
-      <a class="nav-item" data-view="assets">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>
-        资产台账
-        <span class="pill" id="navAssetCount">0</span>
-      </a>
-      <a class="nav-item" data-view="mining">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="5" cy="6" r="2.2"/><circle cx="19" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M7 7.5 10.5 16M17 7.5 13.5 16M7.2 6h9.6"/></svg>
-        攻击面挖掘
-      </a>
-      <a class="nav-item" data-view="ledger">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 2.5h9L19 7v14.5H6z"/><path d="M14.5 2.5V7H19"/><path d="M9 12h7M9 16h5"/></svg>
-        风险台账与整改
-        <span class="pill warn" id="navLedgerCount">0</span>
-        <span class="pill" id="navWoCount" title="处置工单（未终态）">0</span>
-        <span class="pill" id="navNoticeCount" title="线索通报（待报送/超期）">0</span>
-      </a>
-      <a class="nav-item" data-view="customers">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="3.4"/><path d="M22 20v-2a4 4 0 0 0-3-3.87M16.5 3.6a3.4 3.4 0 0 1 0 6.6"/></svg>
-        客户总览
+        <span class="nav-txt"><b>风险总览</b><small>全部客户 EASM 态势汇总</small></span>
         <span class="pill" id="navTenantCount">5</span>
       </a>
-
-      <div class="nav-label">AI Native 内核</div>
-      <a class="nav-item" data-view="harness">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3.2M12 18.3v3.2M2.5 12h3.2M18.3 12h3.2M5.4 5.4l2.3 2.3M16.3 16.3l2.3 2.3M18.6 5.4l-2.3 2.3M7.7 16.3l-2.3 2.3"/></svg>
-        DeepSeek Harness
-        <span class="pill" id="navToolCount">0</span>
-      </a>
-      <a class="nav-item" data-view="toolchain">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="2.5" y="7" width="5" height="10" rx="1.4"/><rect x="9.5" y="7" width="5" height="10" rx="1.4"/><path d="M7.5 12h2M14.5 12h2"/><path d="M16.5 8.5h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-3"/></svg>
-        开源工具链
-      </a>
-      <a class="nav-item" data-view="osslib">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15.5H6.5A2.5 2.5 0 0 0 4 21z"/><path d="M8 7.5h8M8 11h6"/></svg>
-        开源组件库
-        <span class="pill" id="navOssCount">0</span>
-      </a>
-
-      <div class="nav-label">知识支撑</div>
-      <a class="nav-item" data-view="syntax">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20.5 20.5-4-4"/><path d="M8 11h6M11 8v6"/></svg>
-        检索语法库
-        <span class="pill" id="navSyntaxCount">0</span>
-      </a>
-      <a class="nav-item" data-view="classify">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5z"/><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9"/></svg>
-        敏感数据分类
-        <span class="pill" id="navClassifyCount">3</span>
-      </a>
-      <a class="nav-item" data-view="channels">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14 0 18M12 3c-3 3.5-3 14 0 18"/></svg>
-        外部渠道巡查
-        <span class="pill" id="navChannelCount">4</span>
-        <span class="pill" id="navPkgCount" title="暗网线索包（实时）">0</span>
-      </a>
-      <a class="nav-item" data-view="vulnlib">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 2.5 4.5 5.8v6.1c0 4.6 3.2 7.9 7.5 9.1 4.3-1.2 7.5-4.5 7.5-9.1V5.8L12 2.5z"/><path d="M12 8.5v4M12 15.5h.01"/></svg>
-        漏洞库
-        <span class="pill" id="navVulnCount">0</span>
-      </a>
-      <a class="nav-item" data-view="intellib">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20.5 20.5-4-4M11 8v6M8 11h6"/></svg>
-        情报库
-        <span class="pill" id="navIntelCount">0</span>
-      </a>
-      <a class="nav-item" data-view="monitor">
+      <a class="nav-item" data-module="monitor" data-view="monitor">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/></svg>
-        监测与预警
+        <span class="nav-txt"><b>监控与预警</b><small>告警流 · 归属复核 · 监控器</small></span>
         <span class="pill" id="navAlertCount">0</span>
       </a>
-
-      <div class="nav-label">AI 与集成</div>
-      <a class="nav-item" data-view="agents">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 3v4M8 13h.01M16 13h.01M9 17c1.8 1 4.2 1 6 0"/></svg>
-        AI Agent 中心
-      </a>
-      <a class="nav-item" data-view="integrations">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.1 0l2.4-2.4a5 5 0 0 0-7.1-7.1L11 4.9"/><path d="M14 11a5 5 0 0 0-7.1 0L4.5 13.4a5 5 0 0 0 7.1 7.1l1.4-1.4"/></svg>
-        集成与 MCP
+      <a class="nav-item" data-module="sweep" data-view="workflow">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M3 5.5h5.5L11 9h10v9.5H3z"/><path d="M8 9v4.5M13.5 9v4.5M19 9v4.5"/></svg>
+        <span class="nav-txt"><b>排查</b><small>范围下发 · 五阶段 · 台账</small></span>
       </a>
 
-      <div class="nav-label">交付与报告</div>
-      <a class="nav-item" data-view="report">
+      <div class="nav-label">支撑</div>
+      <a class="nav-item" data-module="knowledge" data-view="syntax">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15.5H6.5A2.5 2.5 0 0 0 4 21z"/><path d="M8 7.5h8M8 11h6"/></svg>
+        <span class="nav-txt"><b>知识支撑</b><small>语法 · 分类 · 情报 · 漏洞</small></span>
+      </a>
+      <a class="nav-item" data-module="ai" data-view="agents">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3.2M12 18.3v3.2M2.5 12h3.2M18.3 12h3.2M5.4 5.4l2.3 2.3M16.3 16.3l2.3 2.3M18.6 5.4l-2.3 2.3M7.7 16.3l-2.3 2.3"/></svg>
+        <span class="nav-txt"><b>AI 集成与调用</b><small>Agent · Harness · MCP · API</small></span>
+      </a>
+
+      <div class="nav-label">输出</div>
+      <a class="nav-item" data-module="report" data-view="report">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M14 2.5H7A2 2 0 0 0 5 4.5v15a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.5L14 2.5z"/><path d="M14 2.5v5h5M9 13h6M9 17h4"/></svg>
-        报告中心
+        <span class="nav-txt"><b>报告中心</b><small>实时生成 · md / json 导出</small></span>
         <span class="pill" id="navRptCount" title="报告历史（实时）">0</span>
       </a>
-      <a class="nav-item" data-view="api">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="m8 16-4-4 4-4M16 8l4 4-4 4"/></svg>
-        API 与数据出口
-      </a>
-      <a class="nav-item" data-view="deploy">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="3.5" width="18" height="7" rx="2"/><rect x="3" y="13.5" width="18" height="7" rx="2"/><path d="M7 7h.01M7 17h.01M11 7h6M11 17h6"/></svg>
-        部署与架构
+      <a class="nav-item" data-module="settings" data-view="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.65 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9c.22.63.8 1.03 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51.97z"/></svg>
+        <span class="nav-txt"><b>设置与日志</b><small>数据源 · 运行状态 · 记录</small></span>
       </a>
     </nav>
 
@@ -155,7 +86,7 @@
       <div class="tenant-pick">
         <button class="tp-btn" id="tpBtn">
           <span class="tp-dot" id="tpDot"></span>
-          <span class="tp-nm" id="tpName">全部客户</span>
+          <span class="tp-nm" id="tpName">全部单位</span>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
         </button>
         <div class="tp-menu" id="tpMenu"></div>
@@ -165,11 +96,55 @@
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
         问点什么，或输入指令… <kbd>⌘K</kbd>
       </button>
+      <button class="icon-btn" id="settingsBtn" title="设置">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.65 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9c.22.63.8 1.03 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51.97z"/></svg>
+      </button>
       <button class="icon-btn" id="themeBtn" title="切换主题">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
       </button>
       <div class="avatar">SY</div>
     </header>
+
+    <div class="pagebar">
+      <span class="pagebar-mod" id="pageModule">风险总览</span>
+      <div class="ptabs" id="pageTabs">
+        <div class="ptab-group on" data-module="home">
+          <button class="ptab on" data-view="overview">风险总览</button>
+          <button class="ptab" data-view="customers">被监管单位</button>
+        </div>
+        <div class="ptab-group" data-module="monitor">
+          <button class="ptab" data-view="monitor">告警与监控器</button>
+        </div>
+        <div class="ptab-group" data-module="sweep">
+          <button class="ptab" data-view="workflow">排查工作台<span class="pill" id="navPhaseCount">5</span></button>
+          <button class="ptab" data-view="mining">攻击面挖掘</button>
+          <button class="ptab" data-view="assets">资产台账<span class="pill" id="navAssetCount">0</span></button>
+          <button class="ptab" data-view="ledger">风险台账<span class="pill" id="navLedgerCount">0</span><span class="pill" id="navWoCount" title="处置工单（未终态）" style="display:none">0</span><span class="pill" id="navNoticeCount" title="线索通报（待报送/超期）" style="display:none">0</span></button>
+        </div>
+        <div class="ptab-group" data-module="knowledge">
+          <button class="ptab" data-view="syntax">检索语法<span class="pill" id="navSyntaxCount">0</span></button>
+          <button class="ptab" data-view="classify">敏感数据分类<span class="pill" id="navClassifyCount">3</span></button>
+          <button class="ptab" data-view="channels">外部渠道<span class="pill" id="navChannelCount">4</span><span class="pill" id="navPkgCount" title="暗网线索包（实时）" style="display:none">0</span></button>
+          <button class="ptab" data-view="vulnlib">漏洞库<span class="pill" id="navVulnCount">0</span></button>
+          <button class="ptab" data-view="intellib">情报库<span class="pill" id="navIntelCount">0</span></button>
+          <button class="ptab" data-view="toolchain">开源工具链<span class="pill" id="navToolCount">0</span></button>
+          <button class="ptab" data-view="osslib">开源组件库<span class="pill" id="navOssCount">0</span></button>
+        </div>
+        <div class="ptab-group" data-module="ai">
+          <button class="ptab" data-view="agents">智能编排</button>
+          <button class="ptab" data-view="harness">模型 Harness</button>
+          <button class="ptab" data-view="integrations">集成与 MCP</button>
+          <button class="ptab" data-view="api">API 与数据出口</button>
+        </div>
+        <div class="ptab-group" data-module="report">
+          <button class="ptab" data-view="report">报告中心</button>
+        </div>
+        <div class="ptab-group" data-module="settings">
+          <button class="ptab" data-view="settings">运行设置</button>
+          <button class="ptab" data-view="deploy">部署与架构</button>
+        </div>
+      </div>
+    </div>
 
     <main class="content" id="content">
 
@@ -177,16 +152,35 @@
       <section class="view on" id="view-overview">
         <div class="page-head row between wrap">
           <div>
-            <h2>排查驾驶舱 <span class="badge-demo" data-view="view-overview">示例</span></h2>
-            <p>对外暴露资产与互联网敏感信息泄露排查的一站式态势总览。五阶段排查工作流、三类敏感数据命中与整改闭环一屏掌握。</p>
+            <h2>EASM 风险总览 <span class="badge-demo" data-view="view-overview">示例</span></h2>
+            <p>全部被监管单位的攻击面与敏感信息泄露风险汇总：资产暴露、严重/高危问题、整改闭环与五阶段覆盖一屏可比，点击任意单位即可下钻。</p>
           </div>
           <div class="row" style="gap:8px">
-            <button class="btn sm" onclick="EASM.toast('已导出 CSV 资产快照')">导出快照</button>
-            <button class="btn sm pri" onclick="EASM.toast('已触发一次全量侦察任务')">立即侦察</button>
+            <button class="btn sm" onclick="EASM.exportAssetsCSV()">导出资产快照</button>
+            <button class="btn sm pri" onclick="EASM.go('workflow')">发起排查</button>
           </div>
         </div>
 
         <div class="grid g4" id="kpiGrid"></div>
+
+        <div class="card mt">
+          <div class="card-h">
+            <h3>被监管单位风险汇总</h3>
+            <span class="sub" id="custRiskMeta">—</span>
+            <button class="btn sm ghost" onclick="EASM.go('customers')">单位管理</button>
+          </div>
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead><tr>
+                <th>被监管单位</th><th>行业 / 等级</th>
+                <th class="r">资产</th><th class="r">严重</th><th class="r">高危</th>
+                <th class="r">待整改</th><th class="r">待通报</th>
+                <th>五阶段覆盖</th><th>最近排查</th><th class="r">健康评分</th>
+              </tr></thead>
+              <tbody id="custRiskTbody"></tbody>
+            </table>
+          </div>
+        </div>
 
         <div class="card mt">
           <div class="card-h">
@@ -254,12 +248,12 @@
       <section class="view" id="view-customers">
         <div class="page-head row between wrap">
           <div>
-            <h2>客户总览 <span class="badge-demo" data-view="view-customers">示例</span></h2>
+            <h2>被监管单位 <span class="badge-demo" data-view="view-customers">示例</span></h2>
             <p>多租户统一运营视角：所有客户的攻击面健康度、处置 SLA 与合同状态一屏可比。点击卡片可切换至该客户的专属视图。</p>
           </div>
           <div class="row" style="gap:8px">
-            <button class="btn sm" onclick="EASM.toast('已按客户导出 SLA 达成报表')">导出 SLA 报表</button>
-            <button class="btn sm pri" onclick="EASM.toast('已按客户下发本轮侦察任务 ×5')">下发本轮侦察</button>
+            <button class="btn sm" onclick="EASM.exportCustomersCSV()">导出单位风险汇总</button>
+            <button class="btn sm pri" onclick="EASM.go('workflow')">下发本轮排查</button>
           </div>
         </div>
         <div class="grid g3" id="tenantGrid"></div>
@@ -328,6 +322,55 @@
               <button class="btn sm" onclick="EASM.toast('演示环境：分页已固定')">上一页</button>
               <button class="btn sm" onclick="EASM.toast('演示环境：分页已固定')">下一页</button>
             </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="card-h row between"><h3>身份资产（Phase 1）</h3><span class="note" id="invNote">—</span></div>
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead><tr><th>资产</th><th>类型</th><th>状态</th><th>来源</th><th>最近观察</th></tr></thead>
+              <tbody id="invTbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="card-h row between"><h3>Finding（自动判敏）</h3><span class="note" id="findNote">—</span></div>
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead><tr><th>标题</th><th>严重度</th><th>生命周期</th><th>资产</th><th>来源</th><th>操作</th></tr></thead>
+              <tbody id="findTbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="card-h row between"><h3>发现任务 / 告警</h3><span class="note" id="opsNote">—</span></div>
+          <div class="card-b row wrap" style="gap:8px;border-bottom:1px solid var(--line)">
+            <div class="search grow"><input id="opsFilter" placeholder="筛选资产 / Finding / 告警…"></div>
+            <select class="chip" id="alertChannel" style="height:34px;padding:0 10px">
+              <option value="webhook">webhook</option>
+              <option value="mail">mail</option>
+              <option value="soar">soar</option>
+            </select>
+            <button class="btn sm" onclick="EASM.dispatchAlerts()">推送告警</button>
+            <button class="btn sm" onclick="EASM.go('report')">报告中心</button>
+            <button class="btn sm" onclick="EASM.prevOps()">上一页</button>
+            <span class="note" id="opsPage">1/1</span>
+            <button class="btn sm" onclick="EASM.nextOps()">下一页</button>
+          </div>
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead><tr><th>Job</th><th>Connector</th><th>状态</th><th>尝试</th><th>创建</th></tr></thead>
+              <tbody id="jobTbody"></tbody>
+            </table>
+          </div>
+          <div class="tbl-wrap" style="border-top:1px solid var(--line)">
+            <table class="tbl">
+              <thead><tr><th>告警</th><th>严重度</th><th>状态</th><th>创建</th><th></th></tr></thead>
+              <tbody id="alertTbody"></tbody>
+            </table>
           </div>
         </div>
       </section>
@@ -580,7 +623,7 @@
                 <span class="sub">stdio / SSE / HTTP</span>
               </div>
               <div class="card-b">
-                <div class="code" style="margin-bottom:14px"><div class="code-h"><span class="fname">claude_desktop_config.json</span></div><span class="c">// 将 Sentinel EASM 作为 MCP Server 接入任意 Agent 客户端</span>
+                <div class="code" style="margin-bottom:14px"><div class="code-h"><span class="fname">claude_desktop_config.json</span></div><span class="c">// 将 Lumina EASM 作为 MCP Server 接入任意 Agent 客户端</span>
 {
   <span class="n">"mcpServers"</span>: {
     <span class="n">"sentinel-easm"</span>: {
@@ -753,15 +796,54 @@
       <section class="view" id="view-workflow">
         <div class="page-head row between wrap">
           <div>
-            <h2>五阶段排查工作流 <span class="badge-demo" data-view="view-workflow">示例</span></h2>
-            <p>依据《互联网敏感信息泄露排查》技术要求，把"搜索引擎摸排 → 空间测绘建档 → 端口目录深挖 → 第三方渠道 → 暗网兜底"编排成可执行、可追溯、可考核的标准动作。</p>
+            <h2>排查工作台 <span class="badge-demo" data-view="view-workflow">示例</span></h2>
+            <p>输入排查范围并下发任务：选择被监管单位与排查阶段，平台按该单位授权单（auth_scope）逐阶段执行 P1 搜索引擎 → P2 空间测绘 → P3 端口目录 → P4 第三方渠道 → P5 暗网兜底。</p>
           </div>
           <div class="row" style="gap:10px">
             <button class="btn" onclick="EASM.runFullSweep()">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:15px;height:15px"><path d="M5 3.5 19 12 5 20.5z"/></svg>
-              执行全量排查
+              按当前视角全量排查
             </button>
-            <button class="btn ghost" onclick="EASM.toast('已导出五阶段排查工作底稿（含语法、步骤、产出物、责任人）')">导出底稿</button>
+            <button class="btn ghost" onclick="EASM.exportSweepWorksheet()">导出工作底稿</button>
+          </div>
+        </div>
+
+        <div class="card scope-card">
+          <div class="card-h">
+            <h3>排查范围与任务下发</h3>
+            <span class="sub" id="scopeAuthBadge">授权校验待接入</span>
+          </div>
+          <div class="card-b">
+            <div class="grid scope-grid">
+              <div class="field" style="margin:0">
+                <label>数据域（被监管单位）</label>
+                <select id="scopeTenant" onchange="EASM.scopeChanged()"></select>
+                <p class="note" style="margin-top:6px">选择「全部单位」时逐单位校验各自授权单并分别下发，不会把 A 单位授权用于 B 单位。</p>
+              </div>
+              <div class="field" style="margin:0">
+                <label class="row between" style="display:flex">排查阶段
+                  <span class="row" style="gap:4px">
+                    <button class="btn sm ghost" type="button" onclick="EASM.scopeAllPhases(true)">全选</button>
+                    <button class="btn sm ghost" type="button" onclick="EASM.scopeAllPhases(false)">清空</button>
+                  </span>
+                </label>
+                <div class="phase-checks" id="scopePhases">
+                  <label class="pchk"><input type="checkbox" value="P1" checked><span><b>P1</b> 搜索引擎</span></label>
+                  <label class="pchk"><input type="checkbox" value="P2" checked><span><b>P2</b> 空间测绘</span></label>
+                  <label class="pchk"><input type="checkbox" value="P3" checked><span><b>P3</b> 端口目录</span></label>
+                  <label class="pchk"><input type="checkbox" value="P4" checked><span><b>P4</b> 第三方渠道</span></label>
+                  <label class="pchk"><input type="checkbox" value="P5" checked><span><b>P5</b> 暗网兜底</span></label>
+                </div>
+              </div>
+              <div class="field" style="margin:0">
+                <label>授权范围（只读，来自授权单）</label>
+                <div class="scope-auth" id="scopeAuthInfo">选择具体单位后读取其授权范围；未登记授权单的单位将被拒绝执行。</div>
+              </div>
+            </div>
+            <div class="row between wrap" style="gap:10px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+              <span class="note">排查范围由授权单锁定，不接受任意扩面；未登记、过期、时间窗外或越界目标一律拒绝（一票否决⑥）。</span>
+              <button class="btn pri" id="scopeStart" onclick="EASM.startScopedSweep()">下发排查任务</button>
+            </div>
           </div>
         </div>
 
@@ -1145,6 +1227,74 @@
           <div class="card-b"><div id="pitfallList"></div></div>
         </div>
       </section>
+
+      <!-- ========== VIEW: SETTINGS & LOGS ========== -->
+      <section class="view" id="view-settings">
+        <div class="page-head row between wrap">
+          <div>
+            <h2>设置与日志 <span class="badge-demo" data-view="view-settings">示例</span></h2>
+            <p>数据源接入、系统状态与可读运行记录集中管理。审计事件仅写入、暂无读取接口，本页不伪造审计流。</p>
+          </div>
+          <div class="row" style="gap:8px">
+            <button class="btn sm" onclick="EASM.reloadLiveData()">重新检测</button>
+            <button class="btn sm ghost" onclick="EASM.go('deploy')">部署与架构</button>
+          </div>
+        </div>
+
+        <div class="grid g-2-1">
+          <div class="card">
+            <div class="card-h"><h3>数据源接入</h3><span class="sub">本浏览器会话</span></div>
+            <div class="card-b">
+              <div class="row wrap" style="gap:8px;margin-bottom:12px">
+                <span class="lv-badge" id="lv-state">连接中…</span>
+                <input class="fld" id="lv-token" type="password" title="dev 令牌（ENH-07 后为 OIDC）" placeholder="dev 令牌" style="width:220px">
+                <button class="btn sm pri" id="lv-reload">重载真实数据</button>
+              </div>
+              <div class="kv-list">
+                <div class="kv-row"><span>API 基址</span><b class="mono" id="settingsApiBase">—</b></div>
+                <div class="kv-row"><span>令牌存储</span><b class="mono">localStorage · easm.token</b></div>
+                <div class="kv-row"><span>主题偏好</span><b class="mono">localStorage · easm.theme</b></div>
+              </div>
+              <p class="note" style="margin-top:10px">未接入 OIDC（ENH-07）前为 dev 静态令牌，无过期/无吊销/无作用域，仅限内网或离线验证。令牌只存本浏览器，不写入仓库与文档。</p>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-h"><h3>系统状态</h3><span class="sub" id="settingsCheckedAt">—</span></div>
+            <div class="card-b">
+              <div class="kv-list">
+                <div class="kv-row"><span>健康检查 /healthz</span><b id="settingsHealth">—</b></div>
+                <div class="kv-row"><span>依赖就绪 /readyz</span><b id="settingsReady">—</b></div>
+                <div class="kv-row"><span>可见数据域</span><b id="settingsTenantCount">—</b></div>
+                <div class="kv-row"><span>可读资产</span><b id="settingsAssetCount">—</b></div>
+              </div>
+              <div class="callout info" style="margin-top:12px"><p>状态来自实时探测；端点能力未装配时按 501 如实展示，不用示例数据冒充。</p></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid g2 mt">
+          <div class="card">
+            <div class="card-h"><h3>最近排查任务</h3><span class="sub" id="settingsSweepNote">—</span></div>
+            <div class="tbl-wrap"><table class="tbl"><thead><tr><th>任务</th><th>数据域</th><th>阶段</th><th>状态</th><th class="r">发现</th><th>开始时间</th></tr></thead><tbody id="settingsSweepTbody"></tbody></table></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><h3>最近告警</h3><span class="sub" id="settingsAlertNote">—</span></div>
+            <div class="tbl-wrap"><table class="tbl"><thead><tr><th>等级</th><th>类型</th><th>对象</th><th>资产</th><th>时间</th></tr></thead><tbody id="settingsAlertTbody"></tbody></table></div>
+          </div>
+        </div>
+
+        <div class="card mt">
+          <div class="card-h"><h3>日志边界与审计</h3><span class="sub">不伪造</span></div>
+          <div class="card-b">
+            <div class="callout warn"><p><b>审计查询尚未开放</b>：平台将 allow/deny、门1/门2 降级、通报与高危动作留痕追加写入审计存储，但当前没有对外审计读取 API。本页仅展示可读的排查任务与告警记录，不生成审计流。</p></div>
+            <div class="logger-list">
+              <div class="log-cap"><b>可读</b><span>GET /v1/sweeps · GET /v1/alerts · GET /healthz · GET /readyz</span></div>
+              <div class="log-cap"><b>只写</b><span>audit.Log（allow/deny、门1/门2 降级、通报与高危动作留痕）</span></div>
+              <div class="log-cap"><b>外部前置</b><span>OIDC（ENH-07）· 沙箱复测（ENH-10）· G8-02/03/04/05/06 签字</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
 
   </div>
@@ -1175,7 +1325,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="#04121a" stroke-width="2.4" stroke-linecap="round" style="width:17px;height:17px"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>
     </div>
     <div class="grow">
-      <div class="cp-t">Sentinel Copilot</div>
+      <div class="cp-t">Lumina Copilot</div>
       <div class="cp-s">基于攻击面知识库的 RAG 问答 · 演示模式</div>
     </div>
     <button class="icon-btn" id="copilotClose">

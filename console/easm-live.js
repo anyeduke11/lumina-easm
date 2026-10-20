@@ -10,8 +10,8 @@
   'use strict';
 
   var COLORS = ['#22d3ee', '#fb7185', '#a78bfa', '#34d399', '#fbbf24', '#60a5fa', '#f472b6', '#818cf8'];
-  var live = { token: localStorage.getItem('easm.token') || 'tok-admin', on: false, ledger: false, cls: false, err: '',
-    vuln: false, intel: false, alerts: null, woStatus: '' };
+  var live = { token: localStorage.getItem('easm.token') || 'tok-admin', on: false, empty: false, ledger: false, cls: false, err: '',
+    vuln: false, intel: false, alerts: null, woStatus: '', ops: false };
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -25,11 +25,21 @@
     return u;
   }
 
+  /* app.js 是 IIFE，其 toast 不暴露为全局；而 <div id="toast"> 会让 window.toast 指向 DOM 元素，
+   * 裸调用 toast(...) 会抛 TypeError。统一经 EASM.toast 公共出口。 */
+  function toast(msg) {
+    if (window.EASM && typeof window.EASM.toast === 'function') window.EASM.toast(msg);
+  }
+
   function api(path, opt) {
     opt = opt || {};
     opt.headers = Object.assign({ 'Content-Type': 'application/json' }, opt.headers || {});
     opt.headers['Authorization'] = 'Bearer ' + live.token;
-    return fetch(path, opt).then(function (resp) {
+    return fetch(path, opt).catch(function (e) {
+      var err = new Error(e && e.message ? e.message : String(e));
+      err.network = true;
+      throw err;
+    }).then(function (resp) {
       return resp.text().then(function (txt) {
         if (!resp.ok) {
           var j = {};
@@ -43,36 +53,25 @@
     });
   }
 
-  /* ---- 顶栏注入：令牌 + 数据源徽标 + 刷新 ---- */
-  function injectBar() {
-    var st = document.createElement('style');
-    st.textContent = '#livebar{position:fixed;right:14px;bottom:14px;z-index:9999;display:flex;gap:6px;align-items:center;' +
-      'background:rgba(13,17,23,.92);border:1px solid #2d333b;border-radius:10px;padding:8px 10px;font-size:12px;color:#e6edf3;backdrop-filter:blur(6px)}' +
-      '#livebar input{background:#1f2630;border:1px solid #2d333b;color:#e6edf3;border-radius:6px;padding:4px 8px;width:130px;font-size:12px}' +
-      '#livebar button{background:#f0a13a;border:0;border-radius:6px;color:#141414;padding:4px 10px;cursor:pointer;font-size:12px}' +
-      '.lv-badge{padding:2px 8px;border-radius:8px;border:1px solid currentColor;font-size:11px}' +
-      '.lv-ok{color:#34d399}.lv-err{color:#fb7185}';
-    document.head.appendChild(st);
-    var bar = document.createElement('div');
-    bar.id = 'livebar';
-    bar.innerHTML =
-      '<span class="lv-badge" id="lv-state">连接中…</span>' +
-      '<input id="lv-token" type="password" title="dev 令牌（ENH-07 后为 OIDC）" placeholder="dev 令牌">' +
-      '<button id="lv-reload">重载真实数据</button>';
-    document.body.appendChild(bar);
-    document.getElementById('lv-token').value = live.token;
-    document.getElementById('lv-reload').addEventListener('click', function () {
-      live.token = document.getElementById('lv-token').value.trim();
+  /* ---- 设置抽屉：令牌 + 数据源徽标 + 重载（不常驻主界面，避免遮挡内容） ---- */
+  function bindSettings() {
+    var tok = document.getElementById('lv-token');
+    var reload = document.getElementById('lv-reload');
+    if (!tok || !reload) return;
+    tok.value = live.token;
+    reload.addEventListener('click', function () {
+      live.token = tok.value.trim();
       localStorage.setItem('easm.token', live.token);
       hydrate();
     });
-    document.getElementById('lv-token').addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') document.getElementById('lv-reload').click();
+    tok.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') reload.click();
     });
   }
 
   function badge(txt, cls) {
     var el = document.getElementById('lv-state');
+    if (!el) return;
     el.textContent = txt;
     el.className = 'lv-badge ' + (cls || '');
   }
@@ -113,16 +112,127 @@
   }
 
   /* ---- 主流程：拉真实数据 → 就地替换 EASM.data → 重渲染 ---- */
+  function fmtTime(v) {
+    if (!v) return '—';
+    var s = String(v);
+    return s.length > 19 ? s.slice(0, 19).replace('T', ' ') : s;
+  }
+
+  var OPS_PAGE_SIZE = 10;
+
+  function renderOps() {
+    var d = live.opsData;
+    if (!d) return;
+    var q = (document.getElementById('opsFilter').value || '').toLowerCase();
+    function match(s) { return !q || String(s || '').toLowerCase().indexOf(q) >= 0; }
+    var inv = (d.inv || []).filter(function (a) { return match(a.display_name) || match(a.kind) || match(a.state); });
+    var fnd = (d.fnd || []).filter(function (f) { return match(f.title) || match(f.severity) || match(f.lifecycle); });
+    var jobs = (d.jobs || []).filter(function (j) { return match(j.id) || match(j.state) || match((j.payload && j.payload.connector) || j.kind); });
+    var alerts = (d.alerts || []).filter(function (a) { return match(a.title) || match(a.severity) || match(a.status); });
+    var maxPage = Math.max(1, Math.ceil(Math.max(inv.length, fnd.length, jobs.length, alerts.length) / OPS_PAGE_SIZE));
+    if (live.opsPage >= maxPage) live.opsPage = maxPage - 1;
+    if (live.opsPage < 0) live.opsPage = 0;
+    var from = live.opsPage * OPS_PAGE_SIZE, to = from + OPS_PAGE_SIZE;
+    var invPage = inv.slice(from, to), fndPage = fnd.slice(from, to), jobPage = jobs.slice(from, to), alertPage = alerts.slice(from, to);
+    document.getElementById('invTbody').innerHTML = invPage.length ? invPage.map(function (a) {
+      return '<tr><td>' + esc(a.display_name) + '</td><td>' + esc(a.kind) + '</td><td>' + esc(a.state) +
+        '</td><td>' + esc((a.sources || []).join(', ')) + '</td><td>' + esc(fmtTime(a.last_seen)) + '</td></tr>';
+    }).join('') : '<tr><td colspan="5" class="note">暂无数据</td></tr>';
+    document.getElementById('invNote').textContent = d.invErr ? ('不可用：' + d.invErr) : (inv.length + ' / ' + (d.inv || []).length + ' 项');
+    document.getElementById('findTbody').innerHTML = fndPage.length ? fndPage.map(function (f) {
+      var act = '<button class="btn sm" onclick="EASM.projectFinding(\'' + esc(f.id) + '\')">投影台账</button>';
+      return '<tr><td>' + esc(f.title) + '</td><td>' + esc(f.severity) + '</td><td>' + esc(f.lifecycle) +
+        '</td><td>' + esc(f.asset_id) + '</td><td>' + esc(f.source) + '</td><td>' + act + '</td></tr>';
+    }).join('') : '<tr><td colspan="6" class="note">暂无数据</td></tr>';
+    document.getElementById('findNote').textContent = d.fndErr ? ('不可用：' + d.fndErr) : (fnd.length + ' / ' + (d.fnd || []).length + ' 项');
+    document.getElementById('jobTbody').innerHTML = jobPage.length ? jobPage.map(function (j) {
+      var c = (j.payload && j.payload.connector) || j.kind;
+      return '<tr><td>' + esc(j.id) + '</td><td>' + esc(c) + '</td><td>' + esc(j.state) + '</td><td>' + esc(j.attempts) +
+        '</td><td>' + esc(fmtTime(j.created_at)) + '</td></tr>';
+    }).join('') : '<tr><td colspan="5" class="note">暂无任务</td></tr>';
+    document.getElementById('alertTbody').innerHTML = alertPage.length ? alertPage.map(function (a) {
+      var btn = a.status === 'open' ? '<button class="btn sm" onclick="EASM.ackAlert(\'' + esc(a.id) + '\')">确认</button>' : '';
+      return '<tr><td>' + esc(a.title) + '</td><td>' + esc(a.severity) + '</td><td>' + esc(a.status) +
+        '</td><td>' + esc(fmtTime(a.created_at)) + '</td><td>' + btn + '</td></tr>';
+    }).join('') : '<tr><td colspan="5" class="note">暂无告警</td></tr>';
+    document.getElementById('opsNote').textContent = (d.jobsErr || d.alertErr) ? '部分不可用' : (jobs.length + ' job / ' + alerts.length + ' 告警');
+    document.getElementById('opsPage').textContent = (live.opsPage + 1) + '/' + maxPage;
+    live.ops = true;
+  }
+
+  function hydrateOps(d) {
+    var tid = (d.state && d.state.tenant) || (d.TENANTS[0] && d.TENANTS[0].id);
+    if (!tid) return Promise.resolve();
+    var base = '/v1/entities/' + encodeURIComponent(tid);
+    function safe(p) { return api(p).catch(function (e) { return { __err: e.message || String(e) }; }); }
+    return Promise.all([
+      safe(base + '/inventory'), safe(base + '/findings'), safe(base + '/jobs'), safe(base + '/alerts')
+    ]).then(function (r) {
+      live.opsData = {
+        inv: (r[0] && r[0].assets) || [], fnd: (r[1] && r[1].findings) || [],
+        jobs: (r[2] && r[2].jobs) || [], alerts: (r[3] && r[3].alerts) || [],
+        invErr: r[0].__err, fndErr: r[1].__err, jobsErr: r[2].__err, alertErr: r[3].__err
+      };
+      live.opsPage = 0;
+      var f = document.getElementById('opsFilter');
+      if (f && !f.__opsBound) { f.addEventListener('input', function () { live.opsPage = 0; renderOps(); }); f.__opsBound = true; }
+      renderOps();
+    });
+  }
+
+  if (window.EASM) {
+    window.EASM.ackAlert = function (id) {
+      var d = window.EASM.data || {};
+      var tid = (d.state && d.state.tenant) || (d.TENANTS && d.TENANTS[0] && d.TENANTS[0].id);
+      if (!tid) return;
+      api('/v1/entities/' + encodeURIComponent(tid) + '/alerts/' + encodeURIComponent(id) + '/ack', { method: 'POST' })
+        .then(function () { hydrate(); })
+        .catch(function (e) { if (window.EASM.toast) window.EASM.toast('确认失败：' + e.message); });
+    };
+    window.EASM.prevOps = function () { if (live.opsPage > 0) { live.opsPage--; renderOps(); } };
+    window.EASM.nextOps = function () {
+      var d = live.opsData; if (!d) return;
+      var max = Math.max(1, Math.ceil(Math.max((d.inv || []).length, (d.fnd || []).length, (d.jobs || []).length, (d.alerts || []).length) / OPS_PAGE_SIZE));
+      if (live.opsPage + 1 < max) { live.opsPage++; renderOps(); }
+    };
+    window.EASM.dispatchAlerts = function () {
+      var d = window.EASM.data || {};
+      var tid = (d.state && d.state.tenant) || (d.TENANTS && d.TENANTS[0] && d.TENANTS[0].id);
+      var ch = (document.getElementById('alertChannel') || {}).value || 'webhook';
+      if (!tid) return;
+      api('/v1/entities/' + encodeURIComponent(tid) + '/alerts:dispatch', { method: 'POST', body: JSON.stringify({ channel: ch }) })
+        .then(function (r) { if (window.EASM.toast) window.EASM.toast('已推送 ' + r.sent + ' 条（跳过 ' + r.skipped + '）'); })
+        .catch(function (e) { if (window.EASM.toast) window.EASM.toast('推送失败：' + e.message); });
+    };
+    window.EASM.projectFinding = function (id) {
+      var d = window.EASM.data || {};
+      var tid = (d.state && d.state.tenant) || (d.TENANTS && d.TENANTS[0] && d.TENANTS[0].id);
+      if (!tid) return;
+      api('/v1/entities/' + encodeURIComponent(tid) + '/findings/' + encodeURIComponent(id) + '/project', { method: 'POST' })
+        .then(function (r) { if (window.EASM.toast) window.EASM.toast('已投影台账：' + r.id); hydrate(); })
+        .catch(function (e) { if (window.EASM.toast) window.EASM.toast('投影失败：' + e.message); });
+    };
+  }
+
   function hydrate() {
     if (!window.EASM || !EASM.data) { setTimeout(hydrate, 300); return; }
     var d = EASM.data;
-    api('/v1/tenants').then(function (ts) {
+    var empty = false;
+    return api('/v1/entities').then(function (ts) {
       return api('/healthz').then(function () { return ts; });
     }).then(function (ts) {
       var tenants = ts.items || [];
-      if (!tenants.length) { badge('API 可达 · 暂无租户', 'lv-ok'); live.on = true; rerender(d); return Promise.resolve(); }
+      if (!tenants.length) {
+        /* 空库：视图保留内置示例（徽标维持「示例」），不得走下方成功分支把示例标成「实时」 */
+        empty = true;
+        live.empty = true;
+        live.on = false;
+        badge('API 可达 · 暂无租户', 'lv-ok');
+        rerender(d);
+        return Promise.resolve();
+      }
       var perTenant = tenants.map(function (t) {
-        return api('/v1/tenants/' + encodeURIComponent(t.id) + '/assets').catch(function (e) {
+        return api('/v1/entities/' + encodeURIComponent(t.id) + '/assets').catch(function (e) {
           if (e.status === 403) return { items: [] };
           throw e;
         }).then(function (r) { return { t: t, assets: r.items || [] }; });
@@ -155,6 +265,7 @@
         });
         Object.keys(d.ASSET_BY_ID).forEach(function (k) { delete d.ASSET_BY_ID[k]; });
         d.ASSETS.forEach(function (a) { d.ASSET_BY_ID[a.id] = a; });
+        live.empty = false;
         live.on = true;
         // 台账 + 判敏目录 + 排查矩阵（并行，失败不阻塞主数据）
         return Promise.all([
@@ -179,7 +290,9 @@
         ]);
       });
     }).then(function () {
+      if (empty) return;
       rerender(d);
+      hydrateOps(d).catch(function () { /* opsNote 标注失败 */ });
       var parts = ['租户/资产实时'];
       parts.push(live.ledger ? '台账实时' : '台账为示例数据');
       parts.push(live.matrix ? '五阶段实时' : '工作流为示例数据');
@@ -200,16 +313,18 @@
       if (live.vuln) markLive('view-vulnlib');
       if (live.intel) markLive('view-intellib');
       if (live.alerts != null) markLive('view-overview');
-      if (window.toast) toast('真实数据已接入：' + EASM.data.ASSETS.length + ' 资产');
+      toast('真实数据已接入：' + EASM.data.ASSETS.length + ' 资产');
     }).catch(function (e) {
       live.err = e.message;
-      badge('后端不可达：' + e.message, 'lv-err');
+      var prefix = e.network ? '后端不可达' : (e.status ? '接口错误 ' + e.status : '接入异常');
+      if (window.console && console.error) console.error('[easm-live] hydrate failed:', e);
+      badge(prefix + '：' + e.message, 'lv-err');
     });
   }
 
   function rerender(d) {
-    // 顶栏租户菜单依赖 TENANTS 重建 + 当前视图重渲染
-    if (window.EASM.selectTenant) EASM.selectTenant(d.state.tenant);
+    // 顶栏租户菜单依赖 TENANTS 重建 + 当前视图重渲染；静默刷新不覆盖范围选择/操作结果提示
+    if (window.EASM.selectTenant) EASM.selectTenant(d.state.tenant, undefined, true);
     else EASM.go(d.state.view);
   }
 
@@ -369,6 +484,8 @@
   function rptBase() {
     var d = window.EASM && EASM.data ? EASM.data : null;
     if (!d) return null;
+    /* 空库：示例租户不参与真实报告链路，显式提示建档而非静默 404 */
+    if (live.empty) { EASM.toast('后端为空库：请先在「客户总览」建档', 1); return null; }
     var tid = d.state.rptTenant;
     var ids = (d.TENANTS || []).map(function (t) { return t.id; });
     if (ids.indexOf(tid) < 0) { // demo 默认 T-001 在真实租户中不存在：回退首个真实客户
@@ -378,7 +495,7 @@
       var sel = document.getElementById('rptTenant');
       if (sel) sel.value = tid;
     }
-    return '/v1/tenants/' + encodeURIComponent(tid) + '/reports';
+    return '/v1/entities/' + encodeURIComponent(tid) + '/reports';
   }
   function fmtTime(s) { return (s || '').slice(0, 16).replace('T', ' '); }
 
@@ -386,11 +503,13 @@
   function activeTenant() {
     var d = window.EASM && EASM.data ? EASM.data : null;
     if (!d) return null;
+    /* 空库：内置示例租户不得充当真实作用域（否则对 T-001 发请求并误标「实时」） */
+    if (live.empty) return null;
     if (d.state.tenant && d.state.tenant !== 'all') return d.state.tenant;
     var t = (d.TENANTS || [])[0];
     return t ? t.id : null;
   }
-  function tBase(tid) { return '/v1/tenants/' + encodeURIComponent(tid); }
+  function tBase(tid) { return '/v1/entities/' + encodeURIComponent(tid); }
   function scaleText(s) {
     if (!s || (!s.low && !s.high)) return '—';
     return s.low + ' ~ ' + s.high + (s.method ? '（' + s.method + '）' : '');
@@ -410,9 +529,15 @@
   }
 
   function paintReportHistory() {
-    var base = rptBase();
     var tb = document.getElementById('rptTbody');
-    if (!base || !tb) return;
+    if (!tb) return;
+    if (live.empty) {
+      tb.innerHTML = '<tr><td colspan="6" class="note">后端为空库：暂无客户与历史报告（请先在「客户总览」建档）</td></tr>';
+      setPill('navRptCount', null);
+      return;
+    }
+    var base = rptBase();
+    if (!base) return;
     tb.innerHTML = '<tr><td colspan="6" class="note">加载中…</td></tr>';
     api(base).then(function (r) {
       var items = r.items || [];
@@ -793,23 +918,174 @@
       .catch(function (e) { EASM.toast('创建失败：' + e.message, 1); });
   };
 
+  /* ---- 排查范围卡片：读取授权单（GET /v1/entities/{id}/authz）+ 按范围下发 ---- */
+  function scopeTenantID() {
+    var sel = document.getElementById('scopeTenant');
+    var d = window.EASM && EASM.data ? EASM.data : null;
+    var tid = (sel && sel.value) || (d && d.state.scopeTenant) || 'all';
+    if (d) d.state.scopeTenant = tid;
+    return tid;
+  }
+
+  function loadScopeAuth() {
+    var info = document.getElementById('scopeAuthInfo');
+    var badgeEl = document.getElementById('scopeAuthBadge');
+    if (!info || !badgeEl) return;
+    var startBtn = document.getElementById('scopeStart');
+    if (live.empty) {
+      badgeEl.textContent = '后端为空库 · 无客户可排查';
+      badgeEl.className = 'lv-badge lv-warn';
+      info.textContent = '请先在「客户总览」建档；排查须按单位授权单逐一下发（一票否决⑥）。';
+      if (startBtn) startBtn.disabled = true;
+      return;
+    }
+    if (startBtn) startBtn.disabled = false;
+    var tid = scopeTenantID();
+    if (tid === 'all') {
+      badgeEl.textContent = '逐单位校验授权';
+      badgeEl.className = 'sub';
+      info.textContent = '将逐个单位读取授权单并分别下发；任一单位无有效授权即拒绝执行，不跨单位借用授权。';
+      return;
+    }
+    badgeEl.textContent = '读取授权单…';
+    badgeEl.className = 'sub';
+    api(tBase(tid) + '/authz').then(function (s) {
+      var rows = [
+        ['域名', (s.domains || []).join(', ') || '—'],
+        ['IP / CIDR', (s.cidrs || []).join(', ') || '—'],
+        ['端口', (s.ports && s.ports.length ? s.ports.join(', ') : '不限')],
+        ['排除项', (s.excludes || []).join(', ') || '无'],
+        ['有效期', fmtTime(s.valid_from) + ' → ' + fmtTime(s.valid_to)],
+        ['限速', s.rate_limit ? s.rate_limit + ' req/s' : '未配置'],
+        ['时间窗', s.time_window || '全天'],
+        ['二次授权', s.second_auth ? '需要（爆破/弱口令类）' : '不需要'],
+        ['签署主体', s.signer || '—'],
+        ['授权书哈希', s.doc_hash || '—']
+      ];
+      info.innerHTML = rows.map(function (r) {
+        return '<div class="kv-row"><span>' + esc(r[0]) + '</span><b class="mono" style="font-size:11px;word-break:break-all">' + esc(r[1]) + '</b></div>';
+      }).join('');
+      badgeEl.textContent = '授权有效 · ' + tid;
+      badgeEl.className = 'lv-badge lv-ok';
+    }).catch(function (e) {
+      info.textContent = e.status === 404
+        ? '该单位未登记授权单，平台将拒绝执行任何主动排查（一票否决⑥）。'
+        : '授权读取失败：' + e.message;
+      badgeEl.textContent = e.status === 404 ? '无授权单（禁止执行）' : '授权读取失败';
+      badgeEl.className = 'lv-badge ' + (e.status === 404 ? 'lv-warn' : 'lv-err');
+    });
+  }
+
+  /* 逐单位下发：单个单位被拒不影响其他单位，结果逐条如实回报 */
+  function runSweepTasks(tenants, phases, btn) {
+    if (live.empty) { toast('后端为空库：请先在「客户总览」建档', 1); return Promise.resolve(); }
+    if (!tenants.length) { toast('暂无被监管单位，请先建档', 1); return Promise.resolve(); }
+    if (btn) btn.disabled = true;
+    toast('排查任务下发：' + (phases.length ? phases.join('/') : 'P1→P5 全量') + ' × ' + tenants.length + ' 个单位（逐单位授权校验）');
+    return Promise.all(tenants.map(function (tid) {
+      return api('/v1/sweeps', { method: 'POST', body: JSON.stringify({ tenant_id: tid, phases: phases }) })
+        .then(function (s) { return { id: tid, s: s }; })
+        .catch(function (e) { return { id: tid, err: e }; });
+    })).then(function (rs) {
+      var ok = rs.filter(function (r) { return !r.err; });
+      var bad = rs.filter(function (r) { return r.err; });
+      if (!ok.length) {
+        var e0 = bad[0].err;
+        if (e0.code === 'no_valid_scope') toast('排查被拒绝：所选单位无有效扫描授权（auth_scope）——录入授权单后再执行（一票否决⑥）', 1);
+        else toast('排查失败：' + e0.message, 1);
+        return;
+      }
+      var found = ok.reduce(function (a, r) { return a + (r.s.findings || 0); }, 0);
+      var tail = bad.length ? ' · 拒绝：' + bad.map(function (r) {
+        return r.id + '（' + (r.err.code === 'no_valid_scope' ? '无有效授权' : r.err.message) + '）';
+      }).slice(0, 3).join('；') : '';
+      toast('排查完成 · 新发现入台账 ' + found + ' 项（幂等：重跑不复制）' + tail);
+      return hydrateQuick();
+    }).catch(function (e) {
+      toast('排查失败：' + e.message, 1);
+    }).then(function () { if (btn) btn.disabled = false; });
+  }
+
   function sweepRun(phases) {
     var st = window.EASM && EASM.data ? EASM.data.state : { tenant: 'all' };
     var tenants = st.tenant === 'all'
       ? (EASM.data.TENANTS || []).map(function (t) { return t.id; })
       : [st.tenant];
-    if (!tenants.length) { toast('暂无租户，请先在「客户总览」建档'); return; }
-    toast('排查任务下发：' + (phases.length ? phases.join('/') : 'P1→P5 全量') + ' × ' + tenants.length + ' 家客户');
-    Promise.all(tenants.map(function (tid) {
-      return api('/v1/sweeps', { method: 'POST', body: JSON.stringify({ tenant_id: tid, phases: phases }) });
-    })).then(function (sweeps) {
-      var found = sweeps.reduce(function (a, s) { return a + (s.findings || 0); }, 0);
-      toast('排查完成 · 新发现入台账 ' + found + ' 项（幂等：重跑不复制）');
-      return hydrateQuick();
-    }).catch(function (e) {
-      if (e.code === 'no_valid_scope') toast('该单位无有效扫描授权（auth_scope）——先在集成面录入授权书（一票否决⑥），已拒绝执行', 1);
-      else toast('排查失败：' + e.message, 1);
+    return runSweepTasks(tenants, phases);
+  }
+
+  function startScopedSweep() {
+    var sel = document.getElementById('scopeTenant');
+    var d = window.EASM && EASM.data ? EASM.data : null;
+    if (!d || !sel) return;
+    var tid = scopeTenantID();
+    var phases = [];
+    document.querySelectorAll('#scopePhases input[type=checkbox]').forEach(function (c) {
+      if (c.checked) phases.push(c.value);
     });
+    if (!phases.length) { toast('请至少选择一个排查阶段', 1); return; }
+    var tenants = tid === 'all' ? (d.TENANTS || []).map(function (t) { return t.id; }) : [tid];
+    runSweepTasks(tenants, phases, document.getElementById('scopeStart'));
+  }
+
+  /* ---- 设置与日志：真实探活 + 可读运行记录（审计无读口，不伪造） ---- */
+  function paintSettings() {
+    var tbS = document.getElementById('settingsSweepTbody');
+    var tbA = document.getElementById('settingsAlertTbody');
+    if (!tbS || !tbA) return;
+    var d = window.EASM && EASM.data ? EASM.data : null;
+    if (d) {
+      var tc = document.getElementById('settingsTenantCount');
+      var ac = document.getElementById('settingsAssetCount');
+      // 空库时 d.TENANTS/ASSETS 仍是内置示例：不得把示例数量标成可读资产
+      if (tc) tc.textContent = live.on ? (d.TENANTS || []).length + ' 个' : (live.empty ? '0 个（后端为空库）' : '—');
+      if (ac) ac.textContent = live.on ? (d.ASSETS || []).length + ' 项' : (live.empty ? '0 项（后端为空库）' : '—');
+    }
+    function markState(id, ok, txt) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = txt;
+      el.style.color = ok ? 'var(--mint)' : 'var(--crit)';
+    }
+    api('/healthz').then(function (r) { markState('settingsHealth', r.status === 'ok', '正常 · ' + (r.status || 'ok')); })
+      .catch(function (e) { markState('settingsHealth', false, e.network ? '不可达' : '异常 ' + (e.status || e.message)); });
+    api('/readyz').then(function (r) { markState('settingsReady', r.status === 'ready', '就绪 · ' + (r.status || 'ready')); })
+      .catch(function (e) {
+        markState('settingsReady', false, e.status === 503 ? '依赖未就绪（503）' : (e.network ? '不可达' : '异常 ' + (e.status || e.message)));
+      });
+    api('/v1/sweeps').then(function (r) {
+      var items = (r.items || []).filter(function (s) { return s.status !== 'snapshot'; });
+      items.sort(function (a, b) { return String(b.started_at || '').localeCompare(String(a.started_at || '')); });
+      tbS.innerHTML = items.length ? items.slice(0, 8).map(function (s) {
+        var st = s.status === 'done' ? '<span class="tag ok">完成</span>'
+          : s.status === 'failed' ? '<span class="tag err">失败</span>'
+          : s.status === 'running' ? '<span class="tag warn">执行中</span>'
+          : '<span class="tag">' + esc(s.status) + '</span>';
+        return '<tr><td class="mono" style="font-size:11px">' + esc(s.id) + '</td><td class="mono">' + esc(s.tenant) + '</td>'
+          + '<td class="note">' + esc((s.phases || []).join('/') || '全量') + '</td><td>' + st + '</td>'
+          + '<td class="r mono">' + (s.findings || 0) + '</td><td class="note mono">' + esc(fmtTime(s.started_at)) + '</td></tr>';
+      }).join('') : '<tr><td colspan="6" class="note">暂无排查任务</td></tr>';
+      var note = document.getElementById('settingsSweepNote');
+      if (note) note.textContent = items.length + ' 条 · 最新 ' + (items[0] ? fmtTime(items[0].started_at) : '—');
+    }).catch(function (e) {
+      tbS.innerHTML = '<tr><td colspan="6" class="note">排查任务不可用：' + esc(e.message) + '</td></tr>';
+    });
+    api('/v1/alerts').then(function (r) {
+      var items = r.items || [];
+      tbA.innerHTML = items.length ? items.slice(0, 8).map(function (a) {
+        return '<tr><td><span class="risk ' + (a.severity === 'critical' ? 'r-critical' : a.severity === 'high' ? 'r-high' : 'r-info') + '">' + esc(a.severity) + '</span></td>'
+          + '<td>' + (a.kind === 'vuln_match' ? '漏洞命中' : '情报命中') + '</td>'
+          + '<td class="mono" style="font-size:11px">' + esc(a.ref) + '</td>'
+          + '<td>' + esc(a.asset_name || a.asset_id) + '</td><td class="note mono">' + esc(fmtTime(a.ts)) + '</td></tr>';
+      }).join('') : '<tr><td colspan="5" class="note">暂无告警</td></tr>';
+      var note = document.getElementById('settingsAlertNote');
+      if (note) note.textContent = items.length + ' 条';
+    }).catch(function (e) {
+      tbA.innerHTML = '<tr><td colspan="5" class="note">告警不可用：' + esc(e.message) + '</td></tr>';
+    });
+    var at = document.getElementById('settingsCheckedAt');
+    if (at) at.textContent = '检测于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    if (live.on || live.empty) markLive('view-settings');
   }
 
   function hydrateQuick() {
@@ -817,7 +1093,7 @@
     if (!d) return Promise.resolve();
     return Promise.all([
       Promise.all((d.TENANTS || []).map(function (t) {
-        return api('/v1/tenants/' + encodeURIComponent(t.id) + '/assets').catch(function () { return { items: [] }; });
+        return api('/v1/entities/' + encodeURIComponent(t.id) + '/assets').catch(function () { return { items: [] }; });
       })).then(function (rows) {
         d.ASSETS.length = 0;
         rows.forEach(function (r, ri) {
@@ -863,12 +1139,14 @@
     else if (v === 'report') paintReportHistory();
     else if (v === 'channels') paintChannels();
     else if (v === 'ledger') paintLedgerLive();
+    else if (v === 'workflow') loadScopeAuth();
+    else if (v === 'settings') paintSettings();
   }
   function bindViewSync() {
     if (!window.EASM || EASM.__liveViewSync) return;
     var sel = EASM.selectTenant;
-    EASM.selectTenant = function (a, b) { sel(a, b); syncLiveView(); };
-    document.querySelectorAll('.nav-item').forEach(function (n) {
+    EASM.selectTenant = function (a, b, c) { sel(a, b, c); syncLiveView(); };
+    document.querySelectorAll('.nav-item, .ptab').forEach(function (n) {
       n.addEventListener('click', function () { syncLiveView(); });
     });
     EASM.__liveViewSync = true;
@@ -888,9 +1166,20 @@
         if (v === 'report') { paintReportHistory(); }
         if (v === 'channels') { paintChannels(); }
         if (v === 'ledger') { paintLedgerLive(); }
+        if (v === 'workflow') { loadScopeAuth(); }
+        if (v === 'settings') { paintSettings(); }
       };
       EASM.__monPatched = true;
     }
+    // 排查范围卡片：切换单位即读授权单；下发走逐单位真实 POST /v1/sweeps
+    EASM.scopeChanged = function () { scopeTenantID(); loadScopeAuth(); };
+    EASM.startScopedSweep = startScopedSweep;
+    EASM.loadScopeAuth = loadScopeAuth;
+    EASM.reloadLiveData = function () {
+      toast('重新检测中…');
+      var p = hydrate();
+      if (p && p.then) p.then(function () { if (EASM.data.state.view === 'settings') paintSettings(); });
+    };
     // 报告中心：生成/导出走真实端点（PDF 遗留，显式拒绝）；章节勾选后保留真实历史
     EASM.genReport = easmGenReport;
     EASM.exportReport = function (fmt) {
@@ -922,7 +1211,7 @@
   }
   patchRunners();
 
-  function boot() { injectBar(); bindViewSync(); setTimeout(hydrate, 60); }
+  function boot() { EASM.liveState = live; bindSettings(); bindViewSync(); setTimeout(hydrate, 60); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
 })();

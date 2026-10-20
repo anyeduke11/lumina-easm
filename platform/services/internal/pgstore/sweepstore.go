@@ -29,13 +29,14 @@ func (s *SweepStore) Save(ctx context.Context, sw *sweep.Sweep) error {
 	}
 	// 进度追加语义：保留首次派发时间（worker/重复 Save 不得覆盖 started_at）
 	_, err = s.db.sql.ExecContext(ctx, `INSERT INTO sweeps
-(id,tenant_id,phases,status,steps,findings,error,started_at,ended_at)
-VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9)
+(id,tenant_id,phases,status,steps,findings,error,started_at,ended_at,rate_limit,paced_ms)
+VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11)
 ON CONFLICT (id) DO UPDATE
 SET status=EXCLUDED.status, steps=EXCLUDED.steps, findings=EXCLUDED.findings,
-    error=EXCLUDED.error, ended_at=EXCLUDED.ended_at, updated_at=now()`,
+    error=EXCLUDED.error, ended_at=EXCLUDED.ended_at,
+    rate_limit=EXCLUDED.rate_limit, paced_ms=EXCLUDED.paced_ms, updated_at=now()`,
 		sw.ID, sw.Tenant, pq.Array(textArr(sw.Phases)), sw.Status, steps,
-		sw.Findings, sw.Error, sw.StartedAt, sw.EndedAt)
+		sw.Findings, sw.Error, sw.StartedAt, sw.EndedAt, sw.RateLimit, sw.PacedMS)
 	return err
 }
 
@@ -47,7 +48,8 @@ func scanSweep(row interface{ Scan(dest ...any) error }) (sweep.Sweep, error) {
 		end    sql.NullTime
 		err    sql.NullString
 	)
-	if err := row.Scan(&sw.ID, &sw.Tenant, &phases, &sw.Status, &stepsB, &sw.Findings, &err, &sw.StartedAt, &end); err != nil {
+	if err := row.Scan(&sw.ID, &sw.Tenant, &phases, &sw.Status, &stepsB, &sw.Findings, &err,
+		&sw.StartedAt, &end, &sw.RateLimit, &sw.PacedMS); err != nil {
 		return sweep.Sweep{}, err
 	}
 	sw.Phases = []string(phases)
@@ -61,7 +63,7 @@ func scanSweep(row interface{ Scan(dest ...any) error }) (sweep.Sweep, error) {
 	return sw, nil
 }
 
-const sweepCols = `id,tenant_id,phases,status,steps,findings,error,started_at,ended_at`
+const sweepCols = `id,tenant_id,phases,status,steps,findings,error,started_at,ended_at,rate_limit,paced_ms`
 
 func (s *SweepStore) Get(ctx context.Context, id string) (sweep.Sweep, bool, error) {
 	row := s.db.sql.QueryRowContext(ctx, `SELECT `+sweepCols+` FROM sweeps WHERE id=$1`, id)

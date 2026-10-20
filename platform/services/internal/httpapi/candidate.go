@@ -45,8 +45,9 @@ func (s *Server) handleListUnsupported(w http.ResponseWriter, r *http.Request) {
 		writeError(w, requestIDOf(r), http.StatusNotImplemented, "candidate_unavailable", "候选摄取未启用")
 		return
 	}
-	if !principalOf(r).Can(rbac.PermReadAssets) {
-		writeError(w, requestIDOf(r), http.StatusForbidden, "forbidden", "无读取权限")
+	// 行无租户字段（摄取前坏行）→ 无法行级过滤，按平台级复核面收口（仅管理域可读）。
+	if !principalOf(r).Can(rbac.PermManageTenants) {
+		s.denyAccess(w, r, "candidate.unsupported", "", "/v1/candidates/unsupported", "无管理域权限")
 		return
 	}
 	q := s.cands.Unsupported()

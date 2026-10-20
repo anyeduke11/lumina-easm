@@ -51,14 +51,38 @@ func (s *Server) handleCreateSweep(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListSweeps(w http.ResponseWriter, r *http.Request) {
-	list := s.sweeps.List(r.URL.Query().Get("tenant_id"))
-	writeJSON(w, http.StatusOK, map[string]any{"items": list, "total": len(list)})
+	if s.sweeps == nil {
+		writeError(w, requestIDOf(r), http.StatusNotImplemented, "sweep_unavailable", "五阶段工作流未启用")
+		return
+	}
+	p := principalOf(r)
+	tenant := r.URL.Query().Get("tenant_id")
+	if tenant != "" && !p.InScope(tenant) {
+		s.denyAccess(w, r, "sweep.list", tenant, "/v1/sweeps", "越权租户")
+		return
+	}
+	list := s.sweeps.List(tenant)
+	visible := make([]sweep.Sweep, 0, len(list))
+	for _, sw := range list {
+		if p.InScope(sw.Tenant) {
+			visible = append(visible, sw)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": visible, "total": len(visible)})
 }
 
 func (s *Server) handleGetSweep(w http.ResponseWriter, r *http.Request) {
+	if s.sweeps == nil {
+		writeError(w, requestIDOf(r), http.StatusNotImplemented, "sweep_unavailable", "五阶段工作流未启用")
+		return
+	}
 	sw, ok := s.sweeps.Get(r.PathValue("id"))
 	if !ok {
 		writeError(w, requestIDOf(r), http.StatusNotFound, "not_found", "排查任务不存在")
+		return
+	}
+	if !principalOf(r).InScope(sw.Tenant) {
+		s.denyAccess(w, r, "sweep.get", sw.Tenant, r.URL.Path, "越权租户")
 		return
 	}
 	writeJSON(w, http.StatusOK, sw)

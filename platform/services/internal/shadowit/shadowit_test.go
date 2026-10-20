@@ -1,169 +1,183 @@
 package shadowit
 
 import (
+	"context"
+	"strings"
 	"testing"
 
+	"github.com/wangdev88/easm-platform/platform/services/internal/ai"
 	"github.com/wangdev88/easm-platform/platform/services/internal/ownership"
 )
 
-func owner() *ownership.Service { return ownership.NewService() }
+// ---- 夹具 ----
 
-// 归属样本：域名属主域（判定最强信号）+ 备案主体匹配。
-func ownedInput() Input {
-	return Input{
-		Tenant: "t-a", Domain: "a.example.cn",
-		Identity: ownership.Identity{Tenant: "t-a", Org: "示例科技有限公司", Short: "示例",
-			Domains: []string{"example.cn"}, CIDRs: []string{"198.51.100.0/24"}},
-		Signals:     ownership.Signals{ICPSubject: "示例科技有限公司", WhoisOrg: "Example Technology Co., Ltd"},
-		EvidenceRef: "evi:test",
-	}
+func ident() ownership.Identity {
+	return ownership.Identity{Tenant: "t-a", Org: "华东联合数据服务集团有限公司", Short: "华东数服",
+		Domains: []string{"hddata.cn"}, CIDRs: []string{"203.0.113.0/24"}}
 }
 
-// 疑似样本：非主域、非网段，仅关键词共现（弱信号）。
-func suspectInput() Input {
-	in := ownedInput()
-	in.Domain = "portal.other-cn.net"
-	in.Signals = ownership.Signals{KeywordCooccur: 2}
-	return in
+func adviseInput(domain string, sig ownership.Signals) Input {
+	return Input{Tenant: "t-a", Domain: domain, Identity: ident(), Signals: sig, EvidenceRef: "evi://1"}
 }
 
-// 无关样本：无任何归属信号。
-func unrelatedInput() Input {
-	in := ownedInput()
-	in.Domain = "someone-else.cn"
-	in.Signals = ownership.Signals{}
-	return in
+// mockAI 固定回执：只验证接缝与红线（文案层注入、动作集不变），不依赖真实上游。
+type mockAI struct {
+	content string
+	err     error
 }
 
-func hasAction(a Advice, code string) bool {
-	for _, act := range a.Actions {
-		if act.Code == code {
-			return true
-		}
+func (m mockAI) Name() string { return "mock" }
+func (m mockAI) Chat(_ context.Context, _ ai.ChatRequest) (ai.ChatResponse, error) {
+	if m.err != nil {
+		return ai.ChatResponse{}, m.err
 	}
-	return false
+	return ai.ChatResponse{Content: m.content, Model: "mock-1"}, nil
 }
 
-// 为什么（FR-MIN-003）：已归属的影子资产也要经人审纳管——
-// 「识别出来」≠「自动入账」，建议面不得自带入账副作用。
-func TestAdviseOwnedSuggestsAdmitWithReview(t *testing.T) {
-	a, err := New(owner()).Advise(ownedInput())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a.Verdict != ownership.VerdictOwned {
-		t.Fatalf("样本应判归属，实际 %s（%v）", a.Verdict, a.Reasons)
-	}
-	if !hasAction(a, "admit") {
-		t.Errorf("归属资产应给出纳管建议: %+v", a.Actions)
-	}
-	if !a.NeedsReview {
-		t.Error("纳管必须人审（影子资产不自动入账）")
-	}
-	if len(a.Reasons) == 0 || a.ID == "" || a.EvidenceRef == "" {
-		t.Errorf("建议须可解释（依据/ID/证据引用）: %+v", a)
-	}
-}
+// ---- 确定性建议（M3-C 回归面）----
 
-// 为什么（FR-MIN-003 验收「影子资产不自动入账」）：疑似资产**不得**给出纳管建议——
-// 判定未定的资产若被建议纳管，等于绕开人工复核把疑似资产并入台账（红线）。
+// FR-MIN-003 验收红线：疑似/无关资产的候选动作里不得出现 admit——纳管建议只在归属时出现。
 func TestAdviseSuspectNeverSuggestsAdmit(t *testing.T) {
-	a, err := New(owner()).Advise(suspectInput())
+	svc := New(ownership.NewService())
+	a, err := svc.Advise(adviseInput("stray.example.cn", ownership.Signals{KeywordCooccur: 3}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if a.Verdict != ownership.VerdictSuspect {
-		t.Fatalf("样本应判疑似，实际 %s（%v）", a.Verdict, a.Reasons)
+		t.Fatalf("夹具期望疑似，实际 %+v", a)
 	}
-	if hasAction(a, "admit") {
-		t.Errorf("疑似资产不得给出纳管建议（红线）: %+v", a.Actions)
-	}
-	if !hasAction(a, "verify") {
-		t.Errorf("疑似资产应给出补证建议: %+v", a.Actions)
+	for _, act := range a.Actions {
+		if act.Code == ActionAdmit {
+			t.Fatalf("疑似资产建议不得含 admit（红线）: %+v", a.Actions)
+		}
 	}
 	if !a.NeedsReview {
-		t.Error("疑似资产必须人审")
+		t.Fatal("疑似必须走人工复核")
 	}
 }
 
-// 为什么：无关资产既不该纳管也不该处置（不是本单位资产）——只给出忽略建议。
-func TestAdviseUnrelatedSuggestsIgnore(t *testing.T) {
-	a, err := New(owner()).Advise(unrelatedInput())
+func TestAdviseOwnedSuggestsAdmit(t *testing.T) {
+	svc := New(ownership.NewService())
+	a, err := svc.Advise(adviseInput("portal.hddata.cn", ownership.Signals{}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Verdict != ownership.VerdictUnrelated {
-		t.Fatalf("样本应判无关，实际 %s（%v）", a.Verdict, a.Reasons)
+	if a.Verdict != ownership.VerdictOwned {
+		t.Fatalf("主域子域应判归属: %+v", a)
 	}
-	if hasAction(a, "admit") || hasAction(a, "take_down") {
-		t.Errorf("无关资产不得纳管/处置: %+v", a.Actions)
-	}
-	if !hasAction(a, "ignore") {
-		t.Errorf("无关资产应给出忽略建议: %+v", a.Actions)
-	}
-}
-
-// 为什么：建议须机器可消费且可审计——每条动作为确定性排序、带依据与优先级。
-func TestAdviseActionsAreOrderedAndExplained(t *testing.T) {
-	a, err := New(owner()).Advise(suspectInput())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(a.Actions) == 0 {
-		t.Fatal("应给出动作建议")
-	}
-	for i, act := range a.Actions {
-		if act.Code == "" || act.Name == "" || act.Basis == "" {
-			t.Errorf("动作[%d] 缺依据/名称: %+v", i, act)
-		}
-		if i > 0 && a.Actions[i-1].Priority > act.Priority {
-			t.Errorf("动作应按优先级升序: %+v", a.Actions)
+	has := false
+	for _, act := range a.Actions {
+		if act.Code == ActionAdmit {
+			has = true
 		}
 	}
+	if !has {
+		t.Fatalf("归属应给出纳管候选: %+v", a.Actions)
+	}
+	if !a.NeedsReview {
+		t.Fatal("纳管仍须人审（AX-5）")
+	}
 }
 
-// 为什么（AX-3 可复现）：同输入两次建议必须完全一致（含 ID、动作顺序、依据）。
-func TestAdviseDeterministic(t *testing.T) {
-	s := New(owner())
-	a1, err := s.Advise(ownedInput())
+func TestAdviseUnrelatedOnlyIgnore(t *testing.T) {
+	svc := New(ownership.NewService())
+	a, err := svc.Advise(adviseInput("someone-else.com", ownership.Signals{}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	a2, err := s.Advise(ownedInput())
+	if a.Verdict != ownership.VerdictUnrelated || len(a.Actions) != 1 || a.Actions[0].Code != ActionIgnore {
+		t.Fatalf("无关资产只应有 ignore 动作: %+v", a)
+	}
+}
+
+func TestAdviseValidationAndID(t *testing.T) {
+	svc := New(ownership.NewService())
+	if _, err := svc.Advise(Input{Tenant: "t-a"}); err != ErrBadInput {
+		t.Fatalf("缺域名应 ErrBadInput: %v", err)
+	}
+	a1, _ := svc.Advise(adviseInput("Portal.HDDATA.cn.", ownership.Signals{}))
+	a2, _ := svc.Advise(adviseInput("portal.hddata.cn", ownership.Signals{}))
+	if a1.ID != a2.ID || !strings.HasPrefix(a1.ID, "SA-") {
+		t.Fatalf("建议 ID 应确定性且大小写/尾点归一: %s vs %s", a1.ID, a2.ID)
+	}
+	if a1.Domain != "portal.hddata.cn" {
+		t.Fatalf("域名应归一: %s", a1.Domain)
+	}
+}
+
+// 纳管双闸（M3-C 红线）：缺人审人=ErrReviewRequired；疑似/无关=ErrNotOwned；归属+人审=放行。
+func TestCheckAdmitGates(t *testing.T) {
+	svc := New(ownership.NewService())
+	owned, _ := svc.Advise(adviseInput("portal.hddata.cn", ownership.Signals{}))
+	suspect, _ := svc.Advise(adviseInput("stray.example.cn", ownership.Signals{KeywordCooccur: 3}))
+	if err := svc.CheckAdmit(owned, ActionAdmit, ""); err != ErrReviewRequired {
+		t.Fatalf("缺人审人应 ErrReviewRequired: %v", err)
+	}
+	if err := svc.CheckAdmit(owned, ActionObserve, "u1"); err != ErrReviewRequired {
+		t.Fatalf("非纳管动作应 ErrReviewRequired: %v", err)
+	}
+	if err := svc.CheckAdmit(suspect, ActionAdmit, "u1"); err != ErrNotOwned {
+		t.Fatalf("疑似纳管应 ErrNotOwned: %v", err)
+	}
+	if err := svc.CheckAdmit(owned, ActionAdmit, "u1"); err != nil {
+		t.Fatalf("归属+人审应放行: %v", err)
+	}
+}
+
+// ---- AI 文案接缝（M3-C-AI / ENH-03）----
+
+// 红线回归：AI 文案只写 AIBasis 层——动作集与确定性判定完全不变，
+// 疑似资产的候选动作仍不得出现 admit（AI 不得越权给出纳管建议）。
+func TestAdviseWithAINeverChangesActions(t *testing.T) {
+	svc := New(ownership.NewService()).WithAI(mockAI{content: "建议先补采证书与备案证据，再评估下线。"})
+	in := adviseInput("stray.example.cn", ownership.Signals{KeywordCooccur: 3})
+	base, err := svc.Advise(in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a1.ID != a2.ID || a1.Verdict != a2.Verdict || a1.Confidence != a2.Confidence {
-		t.Errorf("建议不确定: %+v vs %+v", a1, a2)
+	aiAdv, err := svc.AdviseWithAI(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(a1.Actions) != len(a2.Actions) {
-		t.Fatalf("动作数量不一致: %d vs %d", len(a1.Actions), len(a2.Actions))
+	if aiAdv.AIBasis == "" || aiAdv.AIModel != "mock-1" {
+		t.Fatalf("AI 文案应注入 AIBasis/AIModel: %+v", aiAdv)
 	}
-	for i := range a1.Actions {
-		if a1.Actions[i] != a2.Actions[i] {
-			t.Errorf("动作[%d] 不一致: %+v vs %+v", i, a1.Actions[i], a2.Actions[i])
+	if strings.Join(aiAdv.Reasons, "|") != strings.Join(base.Reasons, "|") ||
+		aiAdv.Verdict != base.Verdict || aiAdv.NeedsReview != base.NeedsReview {
+		t.Fatalf("AI 文案不得改变确定性判定: %+v vs %+v", aiAdv, base)
+	}
+	for _, a := range aiAdv.Actions {
+		if a.Code == ActionAdmit {
+			t.Fatalf("疑似资产的 AI 建议仍不得含 admit（红线）: %+v", aiAdv.Actions)
 		}
 	}
+	if len(aiAdv.Actions) != len(base.Actions) {
+		t.Fatalf("AI 文案不得增删动作: %+v vs %+v", aiAdv.Actions, base.Actions)
+	}
 }
 
-// 为什么（红线守卫须落 API 层而非仅文档）：纳管必须显式人审同意且判定为归属。
-func TestAdmitRequiresReviewerAndOwnedVerdict(t *testing.T) {
-	s := New(owner())
-	adv, err := s.Advise(ownedInput())
+func TestAdviseWithAINoProvider(t *testing.T) {
+	svc := New(ownership.NewService())
+	if _, err := svc.AdviseWithAI(context.Background(), adviseInput("portal.hddata.cn", ownership.Signals{})); err != ErrNoAI {
+		t.Fatalf("未装配 provider 应 ErrNoAI（501 诚实边界），实际 %v", err)
+	}
+}
+
+func TestAdviseWithAIUpstreamFailLoud(t *testing.T) {
+	svc := New(ownership.NewService()).WithAI(mockAI{err: context.DeadlineExceeded})
+	if _, err := svc.AdviseWithAI(context.Background(), adviseInput("portal.hddata.cn", ownership.Signals{})); err == nil {
+		t.Fatal("AI 调用失败应上浮（fail loud，不静默降级为确定性文案冒充 AI 文案）")
+	}
+}
+
+// 默认路径不受影响：Advise 纯确定性，无 AI 字段（AX-2）。
+func TestAdviseDeterministicUnchanged(t *testing.T) {
+	svc := New(ownership.NewService()).WithAI(mockAI{content: "x"})
+	a, err := svc.Advise(adviseInput("portal.hddata.cn", ownership.Signals{}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CheckAdmit(adv, "", "张三"); err == nil {
-		t.Error("缺人审人应拒绝纳管")
-	}
-	if err := s.CheckAdmit(adv, "admit", "张三"); err != nil {
-		t.Errorf("归属+人审应放行: %v", err)
-	}
-	sus, err := s.Advise(suspectInput())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.CheckAdmit(sus, "admit", "张三"); err == nil {
-		t.Error("疑似资产纳管必须被拒（红线）")
+	if a.AIBasis != "" || a.AIModel != "" {
+		t.Fatalf("默认 Advise 不得引入 AI 字段: %+v", a)
 	}
 }

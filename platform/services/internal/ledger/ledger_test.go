@@ -208,9 +208,11 @@ func TestSevereRequiresCrossCheck(t *testing.T) {
 		{"无信源", nil, nil, "高", "门1未过"},
 		{"单信源", []string{"rule:R-KEY"}, nil, "高", "门1未过"},
 		{"同源重复标注不算交叉", []string{"rule:R-KEY", "rule:R-KEY"}, nil, "高", "门1未过"},
+		{"同通道多规则不互证", []string{"rule:R-KEY", "rule:R-SRCPKG"}, nil, "高", "门1未过"},
+		{"evidence:none 不算信源", []string{"tool:gitleaks", "evidence:none"}, nil, "高", "门1未过"},
 		{"空串信源不算数", []string{"", "  "}, nil, "高", "门1未过"},
-		{"门1过门2未过", []string{"rule:R-KEY", "rule:R-SRCPKG"}, nil, "高", "门2未过"},
-		{"门1门2全过", []string{"rule:R-KEY", "rule:R-SRCPKG"}, answeredRefute(), "严重", ""},
+		{"门1过门2未过", []string{"rule:R-KEY", "tool:gitleaks"}, nil, "高", "门2未过"},
+		{"门1门2全过", []string{"rule:R-KEY", "tool:gitleaks"}, answeredRefute(), "严重", ""},
 		{"规则+人工复核", []string{"rule:R-KEY", "人工复核:u1"}, answeredRefute(), "严重", ""},
 		{"非严重级不受门约束", []string{"rule:R-PORT"}, nil, "高", ""},
 	}
@@ -270,6 +272,32 @@ func TestGate1DowngradeIsAudited(t *testing.T) {
 	}
 }
 
+// 为什么（P1 信源独立性）：门1 防的是「同一检测动作自我背书」——一次判定轮的
+// 多条规则、同一工具的报告副本都不是独立信源；只有跨通道（规则/工具/人工/证据）
+// 才算交叉。否则「严重」可被单次正则命中刷出来，门1 形同虚设。
+func TestDistinctSourcesChannelSemantics(t *testing.T) {
+	cases := []struct {
+		name string
+		xchk []string
+		want int
+	}{
+		{"同通道多规则", []string{"rule:R-KEY", "rule:R-SRCPKG"}, 1},
+		{"跨工具", []string{"tool:gitleaks", "tool:trufflehog"}, 2},
+		{"同工具大小写重复", []string{"tool:gitleaks", "TOOL:GITLEAKS"}, 1},
+		{"证据无锚点不计数", []string{"tool:gitleaks", "evidence:none"}, 1},
+		{"规则+有效证据锚点", []string{"rule:R-KEY", "evidence:file:///ev/1.json"}, 2},
+		{"规则+人工复核", []string{"rule:R-KEY", "人工复核:u1"}, 2},
+		{"空串不计", []string{"", "  "}, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := distinctSources(c.xchk); got != c.want {
+				t.Errorf("distinctSources(%v)=%d，期望 %d", c.xchk, got, c.want)
+			}
+		})
+	}
+}
+
 // answeredRefute 一条已回答的反证（excluded=结论成立）——供门1门2 全过用例使用。
 func answeredRefute() []RefuteCheck {
 	return []RefuteCheck{{Claim: "命中值为示例占位符", Outcome: "excluded", Evidence: "rule:R-KEY"}}
@@ -307,7 +335,7 @@ func TestSevereRequiresRefuteSearch(t *testing.T) {
 			it := full()
 			it.ID = "L-g2-" + c.name
 			it.Level = "严重"
-			it.XChk = []string{"rule:R-KEY", "rule:R-SRCPKG"} // 门1 先过，隔离测门2
+			it.XChk = []string{"rule:R-KEY", "tool:gitleaks"} // 门1 先过，隔离测门2
 			it.Refute = c.refute
 			if err := s.Create(ctx, admin(), "req", it); err != nil {
 				t.Fatal(err)
@@ -336,7 +364,7 @@ func TestGate2DowngradeIsAudited(t *testing.T) {
 	s, l := newSvc()
 	it := full()
 	it.Level = "严重"
-	it.XChk = []string{"rule:R-KEY", "rule:R-SRCPKG"}
+	it.XChk = []string{"rule:R-KEY", "tool:gitleaks"}
 	it.Refute = []RefuteCheck{{Claim: "命中值为示例占位符", Outcome: "confirmed", Evidence: "value=example_key"}}
 	if err := s.Create(ctx, admin(), "req", it); err != nil {
 		t.Fatal(err)

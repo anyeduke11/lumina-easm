@@ -62,6 +62,9 @@ func (s *Server) handleScanPort(w http.ResponseWriter, r *http.Request) {
 		writeError(w, requestIDOf(r), http.StatusBadRequest, "invalid_request", "target 必填（探测目标）")
 		return
 	}
+	if !s.requireConfirmation(w, r, r.PathValue("id"), "scan.port", in.Target) {
+		return
+	}
 	res, err := s.col.ScanPort(r.Context(), p, requestIDOf(r), r.PathValue("id"), in.Target, in.Ports, in.Owner)
 	if err != nil {
 		failFrom(w, r, err)
@@ -88,6 +91,9 @@ func (s *Server) handleScanDir(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.Unmarshal(body, &in); err != nil || !strings.HasPrefix(in.URL, "http") {
 		writeError(w, requestIDOf(r), http.StatusBadRequest, "invalid_request", "url 必填且须为 http(s) 目标")
+		return
+	}
+	if !s.requireConfirmation(w, r, r.PathValue("id"), "scan.dir", in.URL) {
 		return
 	}
 	res, err := s.col.ScanDir(r.Context(), p, requestIDOf(r), r.PathValue("id"), in.URL, in.Owner)

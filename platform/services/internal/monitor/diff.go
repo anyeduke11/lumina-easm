@@ -60,9 +60,11 @@ func (s *Service) DiffScan(ctx context.Context, visible map[string][]asset.Asset
 			p, existed := prev[a.ID]
 			switch {
 			case !existed && len(prev) > 0:
-				s.addDiffAlert(&newer, "新增", a, a.Risk, f, now)
+				s.addDiffAlert(ctx, &newer, "新增", a, a.Risk, f, now)
+				s.enqueueTask(ctx, a, TriggerDiffNew, "资产新增（diff）")
 			case existed && p != f:
-				s.addDiffAlert(&newer, "变更", a, a.Risk, f, now)
+				s.addDiffAlert(ctx, &newer, "变更", a, a.Risk, f, now)
+				s.enqueueTask(ctx, a, TriggerDiffChanged, "资产变更（指纹变化，diff）")
 			}
 		}
 		ids := make([]string, 0, len(prev))
@@ -80,7 +82,16 @@ func (s *Service) DiffScan(ctx context.Context, visible map[string][]asset.Asset
 	return newer
 }
 
-func (s *Service) addDiffAlert(newer *int, verb string, a asset.Asset, sev, f string, now time.Time) {
+// enqueueTask diff 触发排查任务单（FR-MON-003）：失败上浮不静默（任务单缺失=触发链断裂可观测）。
+func (s *Service) enqueueTask(ctx context.Context, a asset.Asset, trigger, reason string) {
+	if err := s.EnqueueRescan(ctx, a.Tenant, a.ID, a.Name, trigger, reason); err != nil {
+		// 任务单落库失败不阻断 diff 告警链（告警已在流）；下轮同指纹不再触发=风险已知，
+		// 由监控观测面（任务单计数为 0 而告警在涨）暴露，禁止静默吞掉。
+		_ = err
+	}
+}
+
+func (s *Service) addDiffAlert(ctx context.Context, newer *int, verb string, a asset.Asset, sev, f string, now time.Time) {
 	s.appendAlert(newer, Alert{
 		Kind: "asset_diff", Ref: a.ID, TenantID: a.Tenant, AssetID: a.ID, AssetName: a.Name,
 		Severity: sev, Confidence: 1.0, TS: now,

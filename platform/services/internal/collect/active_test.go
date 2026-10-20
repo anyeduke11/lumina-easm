@@ -116,10 +116,15 @@ func TestScanPortFullChain(t *testing.T) {
 
 // targetGate 整体闸通过但细目标拒（模拟授权端口/IP 面收窄）——证明 CheckTarget
 // 消费独立存在（旁路该闸=范围外端口混入候选，必须被本用例捕获）。
+// port=0 的执行前主机预检放行：本用例模拟的是「主机在授权面、端口收窄」，
+// 主机级越界由 TestScanPortRejectsOutOfScopeLiteralIPBeforeExec 单独守卫。
 type targetGate struct{ tErr error }
 
 func (g targetGate) Validate(context.Context, string) error { return nil }
-func (g targetGate) CheckTarget(context.Context, rbac.Principal, string, string, string, int) error {
+func (g targetGate) CheckTarget(_ context.Context, _ rbac.Principal, _, _, _ string, port int) error {
+	if port == 0 {
+		return nil
+	}
 	return g.tErr
 }
 func (g targetGate) RequireSecondAuth(context.Context, string) error { return nil }

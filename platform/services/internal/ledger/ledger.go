@@ -58,7 +58,8 @@ type Item struct {
 	Notify   bool      `json:"notify"`
 	Note     string    `json:"note,omitempty"` // 复测记录
 	// XChk 独立信源清单（V-5 零误报门1 / AX-3：规则ID、工具通道、人工复核编号等）。
-	// 「严重」级结论必须有两个以上独立信源支撑；单源证据入账时降级为「高」并留痕。
+	// 「严重」级结论必须有两个以上独立**通道**支撑（同一次判定轮的多规则、evidence:none
+	// 均不算）；单源证据入账时降级为「高」并留痕。
 	XChk []string `json:"xchk,omitempty"`
 	// Refute 反证记录（V-10 零误报门2 / AX-3：强制回答「哪些事实能否定它」）。
 	// 「严重」级必须至少有一条已回答的反证（Outcome 非空）：没做过反证不得给最高级；
@@ -304,19 +305,38 @@ func (s *Service) Create(ctx context.Context, p rbac.Principal, reqID string, i 
 	return nil
 }
 
-// distinctSources 去重后的非空信源数（同一信源重复标注不构成交叉验证）。
+// distinctSources 独立信源**通道**数（同一通道的多个标注不构成交叉验证）：
+// 一次判定轮的 rule:A/rule:B 同属检测引擎通道=自证，不是两个独立信源；
+// evidence:none 是「无锚点」诚实占位，不计源；不同 tool 视为独立通道（跨工具交叉）。
 func distinctSources(xs []string) int {
 	seen := map[string]bool{}
-	n := 0
 	for _, x := range xs {
 		x = strings.TrimSpace(x)
-		if x == "" || seen[x] {
+		if x == "" {
 			continue
 		}
-		seen[x] = true
-		n++
+		ch, val := x, x
+		if i := strings.IndexByte(x, ':'); i >= 0 {
+			ch, val = strings.ToLower(strings.TrimSpace(x[:i])), strings.TrimSpace(x[i+1:])
+		}
+		switch ch {
+		case "rule":
+			seen["rule"] = true // 同一检测引擎的多条规则=同一信源
+		case "tool":
+			if val == "" {
+				continue
+			}
+			seen["tool:"+strings.ToLower(val)] = true // 同工具重复不计数，跨工具才算独立
+		case "evidence":
+			if val == "" || strings.EqualFold(val, "none") {
+				continue // 无证据锚点不得充当第二信源
+			}
+			seen["evidence"] = true
+		default:
+			seen[ch] = true
+		}
 	}
-	return n
+	return len(seen)
 }
 
 // noteSuffix 验证备注拼接到台账 Note（记录本身已存于 Verifs，此处供列表视图直读）。
